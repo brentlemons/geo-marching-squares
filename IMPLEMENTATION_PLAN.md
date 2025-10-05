@@ -1,6 +1,6 @@
 # Implementation Plan: Java to Rust Port
 
-## Status: Phase 2 - Shape Factory (Ready to Start)
+## Status: Phase 3 - Interpolation (Ready to Start)
 
 This document tracks the progress of porting the Java marching squares implementation to Rust.
 
@@ -53,108 +53,70 @@ Replace Java inheritance with Rust enum + trait pattern:
 
 ---
 
-## Phase 2: Shape Factory and Classification ⬜ NOT STARTED
+## Phase 2: Shape Factory and Classification ✅ COMPLETED
 
-### 2.1 Ternary Classification Function ⬜
-```rust
-fn classify_corner(value: f64, lower: f64, upper: f64) -> u8 {
-    if value < lower { 0 }
-    else if value >= upper { 2 }
-    else { 1 }
-}
-```
+### 2.1 Ternary Classification Function ✅
+- [x] Bitwise ternary classification (0-170 value range)
+- [x] Exact match to Java's encoding scheme
 
-### 2.2 Shape::create() Factory Function ⬜
-- [ ] Static method that:
-  - [ ] Takes 4 GeoJSON features + lower/upper thresholds + position + edge flags
-  - [ ] Computes ternary value (0-170 range, base-3 encoding)
-  - [ ] Matches value to determine ShapeType
-  - [ ] Constructs appropriate Shape variant
-  - [ ] Returns `Option<Shape>` (None for empty/full cells)
+### 2.2 Shape::create() Factory Function ✅
+- [x] Static method that:
+  - [x] Takes 4 GeoJSON features + lower/upper thresholds + position + edge flags
+  - [x] Computes ternary value (0-170 range, bitwise encoding)
+  - [x] Matches value to determine ShapeType (all 81 configurations)
+  - [x] Constructs appropriate Shape variant
+  - [x] Returns `Option<Shape>` (None for empty/full cells)
+- [x] GeoJSON coordinate and value extraction
+- [x] Point generation with blank detection
 
-### 2.3 Shape-Specific Edge Construction ⬜
-Start with Triangle, then expand:
-- [ ] `build_triangle_edges()` - IMPLEMENT FIRST
-- [ ] `build_pentagon_edges()`
-- [ ] `build_rectangle_edges()`
-- [ ] `build_trapezoid_edges()`
-- [ ] `build_hexagon_edges()`
-- [ ] `build_saddle_edges()` (includes center point disambiguation)
-- [ ] `build_square_edges()`
+### 2.3 Shape-Specific Edge Construction ✅
+- [x] `build_triangle_edges()` - 8 configurations
+- [x] `build_pentagon_edges()` - 24 configurations
+- [x] `build_rectangle_edges()` - 12 configurations
+- [x] `build_trapezoid_edges()` - 8 configurations
+- [x] `build_hexagon_edges()` - 12 configurations
+- [x] `build_saddle_edges()` - 14 configurations (all with center-average disambiguation)
+  - [x] Cases: 153, 102, 68, 17, 136, 34, 152, 18, 137, 33, 98, 72, 38, 132
+- [x] `build_square_edges()` - 1 configuration
 
-Mirror exact switch/case logic from Java subclasses.
+### 2.4 Interpolation (moved from Phase 3) ✅
+- [x] Cosine interpolation with 0.999 centering hack
+- [x] Side-specific interpolation methods
+- [x] Exact match to Java formula
 
-**Commit Message:** `feat: implement shape factory and classification`
-
----
-
-## Phase 3: Interpolation ⬜ NOT STARTED
-
-### 3.1 Side Blank Detection ⬜
-```rust
-impl Shape {
-    fn is_top_blank(&self) -> bool
-    fn is_right_blank(&self) -> bool
-    fn is_bottom_blank(&self) -> bool
-    fn is_left_blank(&self) -> bool
-}
-```
-
-### 3.2 Interpolation Methods ⬜
-```rust
-impl Shape {
-    fn interpolate(
-        &self,
-        level: f64,
-        value0: f64,
-        value1: f64,
-        point0: &Point,
-        point1: &Point
-    ) -> Point {
-        // Cosine interpolation with center adjustment
-    }
-
-    fn interpolate_side(&self, level: f64, side: Side) -> Point {
-        // Delegates to interpolate() with appropriate corners
-    }
-}
-```
-
-### 3.3 Point Generation ⬜
-```rust
-impl Shape {
-    fn get_points(&self) -> Vec<Point> {
-        // Creates 8 potential points (2 per side)
-        // Filters nulls, deduplicates
-        // Interpolates points with None coordinates
-    }
-}
-```
-
-**Testing:** Test interpolation matches Java (same inputs → same outputs)
-
-**Commit Message:** `feat: implement interpolation with cosine smoothing`
+**Commit:** `fb68a02` - feat: implement Phase 2 - Shape factory and classification
+**Tests:** 23 passing
+**Lines of code:** 1,901 (vs Java's 2,417 across 11 files)
+**Completed:** 2025-10-05
 
 ---
 
-## Phase 4: GeoJSON Integration ⬜ NOT STARTED
+## Phase 3: Interpolation ✅ COMPLETED (merged into Phase 2)
 
-### 4.1 Input Type Definition ⬜
-Define Rust equivalent of `Feature[][]`:
-- [ ] Use `geojson` crate (already established in Rust ecosystem)
-- [ ] Create helper to extract:
-  - [ ] Point coordinates from geometry
-  - [ ] Value property from feature properties
-- [ ] Input signature: `&[Vec<geojson::Feature>]` or custom wrapper
+**Note:** Interpolation was implemented as part of Phase 2 since it's integral to the shape factory system.
 
-### 4.2 Coordinate Extraction ⬜
-```rust
-fn extract_point_data(feature: &geojson::Feature) -> Result<(f64, f64, f64), Error> {
-    // Returns (longitude, latitude, value)
-}
-```
+All interpolation functionality is complete:
+- [x] Side blank detection (is_top_blank, is_right_blank, etc.)
+- [x] Cosine interpolation with center adjustment (0.999 hack)
+- [x] Side-specific interpolation
+- [x] 8-point generation with filtering and deduplication
 
-**Commit Message:** `feat: add GeoJSON integration and coordinate extraction`
+See Phase 2.4 above for details.
+
+---
+
+## Phase 4: GeoJSON Integration ✅ COMPLETED (merged into Phase 2)
+
+**Note:** GeoJSON integration was implemented as part of the Shape::create() factory method.
+
+All GeoJSON functionality is complete:
+- [x] Use `geojson` crate (version 0.24)
+- [x] Helper methods for extraction:
+  - [x] `extract_coords()` - Point coordinates from geometry
+  - [x] `extract_value()` - Value property from feature properties
+- [x] Input signature: `&geojson::Feature` for each corner
+
+See Phase 2.2 above for details.
 
 ---
 
