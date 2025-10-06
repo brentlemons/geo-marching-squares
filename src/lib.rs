@@ -24,11 +24,13 @@ mod point;
 mod edge;
 mod shape;
 mod cell;
+mod marching_squares;
 
 pub use point::{Point, Side};
 pub use edge::{Edge, EdgeType, Move};
 pub use shape::{Shape, ShapeType};
 pub use cell::Cell;
+pub use marching_squares::process_band;
 
 #[cfg(test)]
 mod tests {

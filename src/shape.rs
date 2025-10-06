@@ -21,7 +21,7 @@ pub enum ShapeType {
 ///
 /// Each shape knows its type, corner points, computed edge points,
 /// and the edges that form its contribution to the contour polygon.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Shape {
     /// The geometric type of this shape
     shape_type: ShapeType,
