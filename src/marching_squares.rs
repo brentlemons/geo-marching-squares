@@ -153,12 +153,16 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
     let cell_rows = cells.len();
     let cell_cols = cells[0].len();
 
+    let edge_walking_start = std::time::Instant::now();
     let mut hold_polygons: VecDeque<Vec<Vec<Position>>> = VecDeque::new();
+    let mut cells_with_shapes = 0;
+    let mut total_edges_found = 0;
 
     // Walk edges to form polygons
     for r in 0..cell_rows {
         for c in 0..cell_cols {
             if let Some(cell) = &mut cells[r][c] {
+                cells_with_shapes += 1;
                 if !cell.is_cleared() {
                     let mut y = r;
                     let mut x = c;
@@ -226,6 +230,7 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
 
                     // Convert edges to polygon coordinates
                     if !edges.is_empty() {
+                        total_edges_found += edges.len();
                         let mut ring: Vec<Position> = Vec::new();
 
                         // Add first edge's start point
@@ -249,7 +254,12 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
         }
     }
 
+    let edge_walking_elapsed = edge_walking_start.elapsed();
+    eprintln!("[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} shapes, {} total edges, {} polygons)",
+        edge_walking_elapsed, cells_with_shapes, total_edges_found, hold_polygons.len());
+
     // Resolve polygon nesting (exterior vs interior rings) with spatial optimization
+    let nesting_start = std::time::Instant::now();
     // Pre-compute bounding boxes for all polygons to avoid expensive polygon-in-polygon tests
     let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
     let mut polygon_bboxes: Vec<BBox> = Vec::new();
@@ -364,6 +374,7 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
 /// let feature = process_band_from_cells(&grid, 10.0, 20.0);
 /// ```
 pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper: f64) -> Feature {
+    let band_start = std::time::Instant::now();
     let rows = data.len();
     let cols = data[0].len();
 
@@ -376,6 +387,7 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
         cells.push(vec![None; cols - 1]);
     }
 
+    let classification_start = std::time::Instant::now();
     eprintln!("[geo-marching-squares] process_band_from_cells: Creating {} cells", (rows - 1) * (cols - 1));
     for r in 0..rows - 1 {
         for c in 0..cols - 1 {
@@ -395,18 +407,24 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
             );
         }
     }
+    let classification_elapsed = classification_start.elapsed();
 
     let cell_rows = cells.len();
     let cell_cols = cells[0].len();
 
+    eprintln!("[geo-marching-squares] ⏱️  Shape Classification: {:?}", classification_elapsed);
     eprintln!("[geo-marching-squares] process_band_from_cells: Cells created, now walking edges");
 
+    let edge_walking_start = std::time::Instant::now();
     let mut hold_polygons: VecDeque<Vec<Vec<Position>>> = VecDeque::new();
+    let mut cells_with_shapes = 0;
+    let mut total_edges_found = 0;
 
     // Walk edges to form polygons
     for r in 0..cell_rows {
         for c in 0..cell_cols {
             if let Some(cell) = &mut cells[r][c] {
+                cells_with_shapes += 1;
                 if !cell.is_cleared() {
                     let mut y = r;
                     let mut x = c;
@@ -474,6 +492,7 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
 
                     // Convert edges to polygon coordinates
                     if !edges.is_empty() {
+                        total_edges_found += edges.len();
                         let mut ring: Vec<Position> = Vec::new();
 
                         // Add first edge's start point
@@ -497,7 +516,12 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
         }
     }
 
+    let edge_walking_elapsed = edge_walking_start.elapsed();
+    eprintln!("[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} shapes, {} total edges, {} polygons)",
+        edge_walking_elapsed, cells_with_shapes, total_edges_found, hold_polygons.len());
+
     // Resolve polygon nesting (exterior vs interior rings) with spatial optimization
+    let nesting_start = std::time::Instant::now();
     // Pre-compute bounding boxes for all polygons to avoid expensive polygon-in-polygon tests
     let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
     let mut polygon_bboxes: Vec<BBox> = Vec::new();
@@ -564,11 +588,15 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
             polygon_bboxes.push(subject_bbox);
         }
     }
+    let nesting_elapsed = nesting_start.elapsed();
+    eprintln!("[geo-marching-squares] ⏱️  Polygon Nesting Resolution: {:?} ({} final polygons)",
+        nesting_elapsed, polygons.len());
 
     eprintln!("[geo-marching-squares] process_band_from_cells: Edge walking complete, building feature with {} polygons",
         polygons.len());
 
     // Build MultiPolygon geometry
+    let geometry_start = std::time::Instant::now();
     let multi_polygon = GeoValue::MultiPolygon(polygons);
 
     // Create Feature with properties
@@ -584,7 +612,11 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
         props.insert("lower_level".to_string(), serde_json::json!(lower));
         props.insert("upper_level".to_string(), serde_json::json!(upper));
     }
+    let geometry_elapsed = geometry_start.elapsed();
+    let total_elapsed = band_start.elapsed();
 
+    eprintln!("[geo-marching-squares] ⏱️  Geometry Building: {:?}", geometry_elapsed);
+    eprintln!("[geo-marching-squares] ⏱️  TOTAL BAND TIME: {:?}", total_elapsed);
     eprintln!("[geo-marching-squares] process_band_from_cells: Feature complete for band [{}, {})", lower, upper);
 
     feature
