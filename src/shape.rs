@@ -176,6 +176,116 @@ impl Shape {
         Some(shape)
     }
 
+    /// Create a shape from GridCell data (memory-efficient alternative)
+    ///
+    /// This is the high-performance alternative to `create()` for large grids.
+    /// Uses lightweight GridCell structs instead of full GeoJSON Features,
+    /// reducing memory usage by ~12x.
+    ///
+    /// # Arguments
+    ///
+    /// * `top_left` - Top-left grid cell
+    /// * `top_right` - Top-right grid cell
+    /// * `bottom_right` - Bottom-right grid cell
+    /// * `bottom_left` - Bottom-left grid cell
+    /// * `lower` - Lower threshold for isoband
+    /// * `upper` - Upper threshold for isoband
+    /// * `x` - Column position in grid
+    /// * `y` - Row position in grid
+    /// * `top_edge` - Is this cell on the top edge?
+    /// * `right_edge` - Is this cell on the right edge?
+    /// * `bottom_edge` - Is this cell on the bottom edge?
+    /// * `left_edge` - Is this cell on the left edge?
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_from_cells(
+        top_left: &crate::GridCell,
+        top_right: &crate::GridCell,
+        bottom_right: &crate::GridCell,
+        bottom_left: &crate::GridCell,
+        lower: f64,
+        upper: f64,
+        x: usize,
+        y: usize,
+        top_edge: bool,
+        right_edge: bool,
+        bottom_edge: bool,
+        left_edge: bool,
+    ) -> Option<Self> {
+        let tl = top_left.value;
+        let tr = top_right.value;
+        let br = bottom_right.value;
+        let bl = bottom_left.value;
+
+        // Create corner points
+        let top_left_pt = Point::new(top_left.lon, top_left.lat);
+        let top_right_pt = Point::new(top_right.lon, top_right.lat);
+        let bottom_right_pt = Point::new(bottom_right.lon, bottom_right.lat);
+        let bottom_left_pt = Point::new(bottom_left.lon, bottom_left.lat);
+
+        // Compute ternary classification value using bitwise encoding
+        let mut value = 0u8;
+        value |= if tl < lower { 0 } else if tl >= upper { 128 } else { 64 };
+        value |= if tr < lower { 0 } else if tr >= upper { 32 } else { 16 };
+        value |= if br < lower { 0 } else if br >= upper { 8 } else { 4 };
+        value |= if bl < lower { 0 } else if bl >= upper { 2 } else { 1 };
+
+        // Determine shape type from value
+        let shape_type = match value {
+            0 | 170 => return None, // Empty or full cell
+
+            169 | 166 | 154 | 106 | 1 | 4 | 16 | 64 => ShapeType::Triangle,
+
+            101 | 149 | 86 | 89 | 69 | 21 | 84 | 81 | 96 | 24 | 6 | 129 | 74 | 146 | 164 | 41 |
+            66 | 144 | 36 | 9 | 104 | 26 | 134 | 161 => ShapeType::Pentagon,
+
+            5 | 20 | 80 | 65 | 165 | 150 | 90 | 105 | 160 | 130 | 10 | 40 => ShapeType::Rectangle,
+
+            168 | 2 | 162 | 8 | 138 | 32 | 42 | 128 => ShapeType::Trapezoid,
+
+            37 | 133 | 148 | 22 | 82 | 88 | 73 | 97 | 145 | 25 | 70 | 100 => ShapeType::Hexagon,
+
+            153 | 102 | 68 | 17 | 136 | 34 | 152 | 18 | 137 | 33 | 98 | 72 | 38 | 132 => ShapeType::Saddle,
+
+            85 => ShapeType::Square,
+
+            _ => {
+                eprintln!("Unknown shape value: {}", value);
+                return None;
+            }
+        };
+
+        let mut shape = Self {
+            shape_type,
+            top_left: top_left_pt,
+            top_right: top_right_pt,
+            bottom_right: bottom_right_pt,
+            bottom_left: bottom_left_pt,
+            value,
+            points: Vec::new(),
+            edges: HashMap::new(),
+            x,
+            y,
+            cleared: false,
+            used_edges: 0,
+            top_edge,
+            right_edge,
+            bottom_edge,
+            left_edge,
+            tl,
+            tr,
+            bl,
+            br,
+            lower,
+            upper,
+        };
+
+        // Generate points and build edges
+        shape.points = shape.get_points();
+        shape.build_edges();
+
+        Some(shape)
+    }
+
     /// Extract coordinates from a GeoJSON feature
     fn extract_coords(feature: &geojson::Feature) -> Option<(f64, f64)> {
         if let Some(geojson::Geometry { value: geojson::Value::Point(coords), .. }) = &feature.geometry {

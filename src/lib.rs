@@ -6,11 +6,44 @@
 //! This library generates **isobands** (filled contour polygons) and **isolines** (contour lines)
 //! from 2D scalar fields using geographic coordinates (latitude/longitude).
 //!
+//! ## Input Formats
+//!
+//! The library supports two input formats:
+//!
+//! 1. **GridCell** (Recommended for large grids): Lightweight 24-byte structs
+//!    - Memory usage: ~46 MB for 1799×1059 HRRR grid
+//!    - **12x more memory-efficient** than GeoJSON Features
+//!    - Best for meteorological/oceanographic applications
+//!
+//! 2. **GeoJSON Features**: Full-featured with metadata support
+//!    - Memory usage: ~380-570 MB for 1799×1059 grid
+//!    - Better for small grids or when metadata is needed
+//!
 //! ## Examples
 //!
-//! ### Concurrent Processing (Recommended)
+//! ### Concurrent Processing with GridCell (Recommended for Large Grids)
 //!
-//! Process multiple isoband levels in parallel for maximum performance:
+//! Process multiple isoband levels in parallel with minimal memory usage:
+//!
+//! ```rust,ignore
+//! use geo_marching_squares::{do_concurrent_from_cells, GridCell};
+//!
+//! // Your 2D grid of lightweight GridCell structs
+//! let grid: Vec<Vec<GridCell>> = load_grid_data();
+//!
+//! // Define isoband thresholds (creates N-1 bands from N thresholds)
+//! let thresholds = vec![0.0, 10.0, 20.0, 30.0, 40.0];
+//!
+//! // Generate all isobands in parallel using Rayon
+//! let result = do_concurrent_from_cells(&grid, &thresholds);
+//!
+//! // Result contains 4 isobands: 0-10, 10-20, 20-30, 30-40
+//! println!("Generated {} isoband features", result.features.len());
+//! ```
+//!
+//! ### Concurrent Processing with GeoJSON Features
+//!
+//! Traditional approach using full GeoJSON Feature objects:
 //!
 //! ```rust,ignore
 //! use geo_marching_squares::do_concurrent;
@@ -19,13 +52,12 @@
 //! // Your 2D grid of GeoJSON point features with scalar values
 //! let grid: Vec<Vec<Feature>> = load_grid_data();
 //!
-//! // Define isoband thresholds (creates N-1 bands from N thresholds)
+//! // Define isoband thresholds
 //! let thresholds = vec![0.0, 10.0, 20.0, 30.0, 40.0];
 //!
-//! // Generate all isobands in parallel using Rayon
+//! // Generate all isobands in parallel
 //! let result: FeatureCollection = do_concurrent(&grid, &thresholds);
 //!
-//! // Result contains 4 isobands: 0-10, 10-20, 20-30, 30-40
 //! println!("Generated {} isoband features", result.features.len());
 //! ```
 //!
@@ -87,12 +119,16 @@ mod shape;
 mod cell;
 mod isoline_assembler;
 mod marching_squares;
+mod grid_cell;
 
 pub use point::{Point, Side};
 pub use edge::{Edge, EdgeType, Move};
 pub use shape::{Shape, ShapeType};
 pub use cell::{Cell, LineSegment};
-pub use marching_squares::{process_band, do_concurrent, process_line, do_concurrent_lines};
+pub use marching_squares::{process_band, do_concurrent, process_line, do_concurrent_lines,
+                            process_band_from_cells, do_concurrent_from_cells,
+                            process_line_from_cells, do_concurrent_lines_from_cells};
+pub use grid_cell::GridCell;
 
 #[cfg(test)]
 mod tests {

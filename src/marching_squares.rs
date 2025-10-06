@@ -274,6 +274,231 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
     feature
 }
 
+/// Process a single isoband level from GridCell data (memory-efficient)
+///
+/// This is the high-performance alternative to `process_band()` for large grids.
+/// Uses lightweight GridCell structs instead of full GeoJSON Features,
+/// reducing memory usage by ~12x.
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GridCell structs
+/// * `lower` - Lower threshold for this isoband
+/// * `upper` - Upper threshold for this isoband
+///
+/// # Returns
+///
+/// A GeoJSON Feature containing:
+/// - MultiPolygon geometry with all contour polygons for this band
+/// - Properties: "lower_level" and "upper_level"
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::{process_band_from_cells, GridCell};
+///
+/// let grid: Vec<Vec<GridCell>> = load_grid_data();
+/// let feature = process_band_from_cells(&grid, 10.0, 20.0);
+/// ```
+pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper: f64) -> Feature {
+    let rows = data.len();
+    let cols = data[0].len();
+
+    // Create cells from grid (rows-1 × cols-1)
+    let mut cells: Vec<Vec<Option<Shape>>> = Vec::with_capacity(rows - 1);
+    for _ in 0..rows - 1 {
+        cells.push(vec![None; cols - 1]);
+    }
+
+    for r in 0..rows - 1 {
+        for c in 0..cols - 1 {
+            cells[r][c] = Shape::create_from_cells(
+                &data[r][c],
+                &data[r][c + 1],
+                &data[r + 1][c + 1],
+                &data[r + 1][c],
+                lower,
+                upper,
+                c,
+                r,
+                r == 0,
+                c + 1 == cols - 1,
+                r + 1 == rows - 1,
+                c == 0,
+            );
+        }
+    }
+
+    let cell_rows = cells.len();
+    let cell_cols = cells[0].len();
+
+    let mut hold_polygons: VecDeque<Vec<Vec<Position>>> = VecDeque::new();
+
+    // Walk edges to form polygons
+    for r in 0..cell_rows {
+        for c in 0..cell_cols {
+            if let Some(cell) = &mut cells[r][c] {
+                if !cell.is_cleared() {
+                    let mut y = r;
+                    let mut x = c;
+                    let mut go_on = true;
+                    let mut edges = Vec::new();
+                    let mut current_edge: Option<Edge> = None;
+
+                    while go_on {
+                        let cell_ref = cells[y][x].as_mut().unwrap();
+
+                        let tmp_edges = if let Some(ref edge) = current_edge {
+                            cell_ref.get_edges(Some(edge.end()))
+                        } else {
+                            cell_ref.get_edges(None)
+                        };
+
+                        if tmp_edges.is_empty() {
+                            break;
+                        }
+
+                        cell_ref.increment_used_edges(tmp_edges.len());
+
+                        for edge in tmp_edges {
+                            cell_ref.remove_edge(edge.start());
+                            current_edge = Some(edge.clone());
+                            edges.push(edge);
+
+                            // Check if loop closed
+                            if current_edge.as_ref().unwrap().end() == edges[0].start() {
+                                go_on = false;
+                                break;
+                            }
+                        }
+
+                        if !go_on {
+                            break;
+                        }
+
+                        // Move to next cell based on edge direction
+                        if let Some(ref edge) = current_edge {
+                            match edge.move_direction() {
+                                Move::Right => x += 1,
+                                Move::Down => y += 1,
+                                Move::Left => {
+                                    if x > 0 {
+                                        x -= 1
+                                    } else {
+                                        go_on = false;
+                                    }
+                                }
+                                Move::Up => {
+                                    if y > 0 {
+                                        y -= 1
+                                    } else {
+                                        go_on = false;
+                                    }
+                                }
+                                Move::Unknown => {
+                                    go_on = false;
+                                    eprintln!("Unknown edge move at ({}, {})", y, x);
+                                }
+                            }
+                        }
+                    }
+
+                    // Convert edges to polygon coordinates
+                    if !edges.is_empty() {
+                        let mut ring: Vec<Position> = Vec::new();
+
+                        // Add first edge's start point
+                        ring.push(vec![
+                            round_coord(edges[0].start().x().unwrap()),
+                            round_coord(edges[0].start().y().unwrap()),
+                        ]);
+
+                        // Add all end points
+                        for edge in &edges {
+                            ring.push(vec![
+                                round_coord(edge.end().x().unwrap()),
+                                round_coord(edge.end().y().unwrap()),
+                            ]);
+                        }
+
+                        hold_polygons.push_back(vec![ring]);
+                    }
+                }
+            }
+        }
+    }
+
+    // Resolve polygon nesting (exterior vs interior rings)
+    let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
+
+    while let Some(subject) = hold_polygons.pop_front() {
+        let mut external = true;
+
+        for i in (0..polygons.len()).rev() {
+            let polygon = &polygons[i];
+            let mut push_out = false;
+
+            // Case 1: subject is inside polygon
+            if polygon_in_polygon(&subject, polygon) {
+                // Check if subject is in a hole (should be pushed out)
+                for j in 1..polygon.len() {
+                    let hole = &polygon[j..j + 1];
+                    if polygon_in_polygon(&subject, &[hole[0].clone()]) {
+                        push_out = true;
+                        break;
+                    }
+                }
+
+                if !push_out {
+                    // Add subject as interior ring (hole) to polygon
+                    let mut new_polygon = polygon.clone();
+                    new_polygon.push(subject[0].clone());
+                    polygons[i] = new_polygon;
+                    external = false;
+                    break;
+                }
+            }
+            // Case 2: polygon is inside subject
+            else if polygon_in_polygon(polygon, &subject) {
+                // Break apart polygon and reprocess
+                if polygon.len() > 1 {
+                    // Has interior rings
+                    for j in 1..polygon.len() {
+                        hold_polygons.push_back(vec![polygon[j].clone()]);
+                    }
+                    hold_polygons.push_back(vec![polygon[0].clone()]);
+                } else {
+                    hold_polygons.push_back(polygon.clone());
+                }
+                polygons.remove(i);
+            }
+        }
+
+        if external {
+            polygons.push(subject);
+        }
+    }
+
+    // Build MultiPolygon geometry
+    let multi_polygon = GeoValue::MultiPolygon(polygons);
+
+    // Create Feature with properties
+    let mut feature = Feature {
+        bbox: None,
+        geometry: Some(Geometry::new(multi_polygon)),
+        id: None,
+        properties: Some(JsonObject::new()),
+        foreign_members: None,
+    };
+
+    if let Some(props) = feature.properties.as_mut() {
+        props.insert("lower_level".to_string(), serde_json::json!(lower));
+        props.insert("upper_level".to_string(), serde_json::json!(upper));
+    }
+
+    feature
+}
+
 /// Check if a Feature has non-empty MultiPolygon geometry
 ///
 /// Used to filter out empty results from isoband processing.
@@ -329,6 +554,68 @@ pub fn do_concurrent(
         .map(|i| {
             // Each thread processes one isoband level
             process_band(data, isobands[i], isobands[i + 1])
+        })
+        .filter(|feature| {
+            // Filter out empty features (no geometry)
+            has_coordinates(feature)
+        })
+        .collect();
+
+    // Build and return FeatureCollection
+    geojson::FeatureCollection {
+        bbox: None,
+        foreign_members: None,
+        features,
+    }
+}
+
+/// Process multiple isoband levels from GridCell data concurrently (memory-efficient)
+///
+/// This is the high-performance alternative to `do_concurrent()` for large grids.
+/// Uses lightweight GridCell structs instead of full GeoJSON Features,
+/// reducing memory usage by ~12x.
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GridCell structs
+/// * `isobands` - Sorted list of threshold values (e.g., [0.0, 10.0, 20.0, 30.0])
+///               Creates N-1 isobands from N threshold values
+///
+/// # Returns
+///
+/// A GeoJSON FeatureCollection containing all isoband features.
+/// Only features with non-empty geometry are included.
+///
+/// # Memory Savings
+///
+/// For a 1799×1059 HRRR grid (1.9M points):
+/// - GridCell array: ~46 MB
+/// - Feature array: ~380-570 MB
+/// - **Savings: ~12x reduction**
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::{do_concurrent_from_cells, GridCell};
+///
+/// let grid: Vec<Vec<GridCell>> = load_grid_data();
+/// let thresholds = vec![0.0, 10.0, 20.0, 30.0];
+///
+/// // Creates 3 isobands: 0-10, 10-20, 20-30
+/// let result = do_concurrent_from_cells(&grid, &thresholds);
+/// ```
+pub fn do_concurrent_from_cells(
+    data: &[Vec<crate::GridCell>],
+    isobands: &[f64],
+) -> geojson::FeatureCollection {
+    use rayon::prelude::*;
+
+    // Process each isoband pair in parallel
+    let features: Vec<Feature> = (0..isobands.len() - 1)
+        .into_par_iter()
+        .map(|i| {
+            // Each thread processes one isoband level
+            process_band_from_cells(data, isobands[i], isobands[i + 1])
         })
         .filter(|feature| {
             // Filter out empty features (no geometry)
@@ -441,6 +728,86 @@ pub fn process_line(data: &[Vec<Feature>], isovalue: f64) -> Feature {
     feature
 }
 
+/// Process a single isoline level from GridCell data (memory-efficient)
+///
+/// This is the high-performance alternative to `process_line()` for large grids.
+/// Uses lightweight GridCell structs instead of full GeoJSON Features,
+/// reducing memory usage by ~12x.
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GridCell structs
+/// * `isovalue` - Threshold value for the contour line
+///
+/// # Returns
+///
+/// A GeoJSON Feature containing:
+/// - MultiLineString geometry with all contour lines
+/// - Property: "isovalue" with the threshold value
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::{process_line_from_cells, GridCell};
+///
+/// let grid: Vec<Vec<GridCell>> = load_grid_data();
+/// let feature = process_line_from_cells(&grid, 15.0);
+/// ```
+pub fn process_line_from_cells(data: &[Vec<crate::GridCell>], isovalue: f64) -> Feature {
+    let rows = data.len();
+    let cols = data[0].len();
+
+    // Create cells from grid (binary classification)
+    let mut cells: Vec<Vec<Option<Cell>>> = Vec::with_capacity(rows - 1);
+    for _ in 0..rows - 1 {
+        cells.push(vec![None; cols - 1]);
+    }
+
+    for r in 0..rows - 1 {
+        for c in 0..cols - 1 {
+            cells[r][c] = Cell::create_from_cells(
+                &data[r][c],
+                &data[r][c + 1],
+                &data[r + 1][c + 1],
+                &data[r + 1][c],
+                isovalue,
+            );
+        }
+    }
+
+    // Assemble line segments into polylines
+    let mut assembler = IsolineAssembler::new();
+
+    for r in 0..cells.len() {
+        for c in 0..cells[0].len() {
+            if let Some(cell) = &cells[r][c] {
+                let segments = cell.get_line_segments();
+                assembler.add_cell_segments(r, c, segments);
+            }
+        }
+    }
+
+    let polylines = assembler.assemble();
+
+    // Build MultiLineString geometry
+    let multi_linestring = GeoValue::MultiLineString(polylines);
+
+    // Create Feature with properties
+    let mut feature = Feature {
+        bbox: None,
+        geometry: Some(Geometry::new(multi_linestring)),
+        id: None,
+        properties: Some(JsonObject::new()),
+        foreign_members: None,
+    };
+
+    if let Some(props) = feature.properties.as_mut() {
+        props.insert("isovalue".to_string(), serde_json::json!(isovalue));
+    }
+
+    feature
+}
+
 /// Process multiple isoline levels concurrently using parallel processing
 ///
 /// Takes a grid and a list of threshold values, and computes all isolines
@@ -476,6 +843,59 @@ pub fn do_concurrent_lines(
     let features: Vec<Feature> = isovalues
         .par_iter()
         .map(|&isovalue| process_line(data, isovalue))
+        .filter(|feature| has_line_coordinates(feature))
+        .collect();
+
+    geojson::FeatureCollection {
+        bbox: None,
+        foreign_members: None,
+        features,
+    }
+}
+
+/// Process multiple isoline levels from GridCell data concurrently (memory-efficient)
+///
+/// This is the high-performance alternative to `do_concurrent_lines()` for large grids.
+/// Uses lightweight GridCell structs instead of full GeoJSON Features,
+/// reducing memory usage by ~12x.
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GridCell structs
+/// * `isovalues` - List of threshold values for contour lines
+///
+/// # Returns
+///
+/// A GeoJSON FeatureCollection containing all isoline features.
+/// Only features with non-empty geometry are included.
+///
+/// # Memory Savings
+///
+/// For a 1799×1059 HRRR grid (1.9M points):
+/// - GridCell array: ~46 MB
+/// - Feature array: ~380-570 MB
+/// - **Savings: ~12x reduction**
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::{do_concurrent_lines_from_cells, GridCell};
+///
+/// let grid: Vec<Vec<GridCell>> = load_grid_data();
+/// let isovalues = vec![0.0, 10.0, 20.0, 30.0];
+///
+/// // Creates 4 isolines at values 0, 10, 20, and 30
+/// let result = do_concurrent_lines_from_cells(&grid, &isovalues);
+/// ```
+pub fn do_concurrent_lines_from_cells(
+    data: &[Vec<crate::GridCell>],
+    isovalues: &[f64],
+) -> geojson::FeatureCollection {
+    use rayon::prelude::*;
+
+    let features: Vec<Feature> = isovalues
+        .par_iter()
+        .map(|&isovalue| process_line_from_cells(data, isovalue))
         .filter(|feature| has_line_coordinates(feature))
         .collect();
 
