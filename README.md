@@ -27,58 +27,72 @@ geojson = "0.24"
 
 ## Quick Start
 
-### Isobands (Filled Contours)
+### Complete Example: Weather Temperature Bands
 
-Generate multiple isoband levels in parallel:
+Here's a complete working example that generates temperature isobands:
 
 ```rust
 use geo_marching_squares::do_concurrent;
-use geojson::{Feature, FeatureCollection};
+use geojson::{Feature, FeatureCollection, Geometry, Value, JsonObject};
 
-// Your 2D grid of GeoJSON Point features with scalar values
-let grid: Vec<Vec<Feature>> = load_temperature_grid();
+fn main() {
+    // Step 1: Create your grid of temperature measurements
+    let grid = create_temperature_grid();
 
-// Define thresholds (creates N-1 bands from N values)
-let thresholds = vec![0.0, 10.0, 20.0, 30.0, 40.0];
+    // Step 2: Define temperature ranges (in Celsius)
+    // This creates 5 bands: <0°, 0-10°, 10-20°, 20-30°, 30+°
+    let thresholds = vec![-10.0, 0.0, 10.0, 20.0, 30.0, 40.0];
 
-// Generate all isobands in parallel
-let result: FeatureCollection = do_concurrent(&grid, &thresholds);
+    // Step 3: Generate isobands in parallel
+    let result: FeatureCollection = do_concurrent(&grid, &thresholds);
 
-// Result contains 4 MultiPolygon features: [0-10), [10-20), [20-30), [30-40)
-for feature in result.features {
-    println!("Band: {:?}", feature.properties);
+    // Step 4: Use the results
+    println!("Generated {} temperature bands", result.features.len());
+
+    for feature in result.features {
+        if let Some(props) = &feature.properties {
+            let lower = props.get("lower_level").unwrap().as_f64().unwrap();
+            let upper = props.get("upper_level").unwrap().as_f64().unwrap();
+            println!("Band: {}°C to {}°C", lower, upper);
+
+            // The geometry contains the actual polygons
+            if let Some(geom) = &feature.geometry {
+                if let Value::MultiPolygon(polygons) = &geom.value {
+                    println!("  Contains {} polygon(s)", polygons.len());
+                }
+            }
+        }
+    }
+
+    // Step 5: Save to file or use in your application
+    let json = serde_json::to_string_pretty(&result).unwrap();
+    std::fs::write("temperature_bands.geojson", json).unwrap();
 }
-```
 
-### Isolines (Contour Lines)
+fn create_temperature_grid() -> Vec<Vec<Feature>> {
+    // Create a 5x5 grid covering a region
+    // In practice, this would come from your weather data
+    let mut grid = Vec::new();
 
-Generate contour lines at specific values:
+    for lat_idx in 0..5 {
+        let mut row = Vec::new();
+        for lon_idx in 0..5 {
+            let lon = -122.0 + (lon_idx as f64 * 0.1);
+            let lat = 37.0 + (lat_idx as f64 * 0.1);
 
-```rust
-use geo_marching_squares::{process_line, do_concurrent_lines};
+            // Simulate temperature values (would be real data in production)
+            let temp = 15.0 + (lat_idx as f64 * 2.0) + (lon_idx as f64 * 1.5);
 
-let grid = load_elevation_grid();
+            row.push(create_point_feature(lon, lat, temp));
+        }
+        grid.push(row);
+    }
 
-// Single isoline at 100m elevation
-let contour = process_line(&grid, 100.0);
-// Returns Feature with MultiLineString geometry
-
-// Multiple isolines in parallel
-let elevations = vec![0.0, 100.0, 200.0, 300.0];
-let contours = do_concurrent_lines(&grid, &elevations);
-// Returns FeatureCollection with 4 MultiLineString features
-```
-
-### Creating Input Data
-
-Input must be a 2D array of GeoJSON Point features with a `value` property:
-
-```rust
-use geojson::{Feature, Geometry, Value, JsonObject};
+    grid
+}
 
 fn create_point_feature(lon: f64, lat: f64, value: f64) -> Feature {
     let geometry = Geometry::new(Value::Point(vec![lon, lat]));
-
     let mut properties = JsonObject::new();
     properties.insert("value".to_string(), serde_json::json!(value));
 
@@ -90,25 +104,99 @@ fn create_point_feature(lon: f64, lat: f64, value: f64) -> Feature {
         foreign_members: None,
     }
 }
+```
 
-// Create a 3x3 grid
-let grid = vec![
-    vec![
-        create_point_feature(0.0, 2.0, 10.0),
-        create_point_feature(1.0, 2.0, 15.0),
-        create_point_feature(2.0, 2.0, 20.0),
-    ],
-    vec![
-        create_point_feature(0.0, 1.0, 12.0),
-        create_point_feature(1.0, 1.0, 18.0),
-        create_point_feature(2.0, 1.0, 22.0),
-    ],
-    vec![
-        create_point_feature(0.0, 0.0, 14.0),
-        create_point_feature(1.0, 0.0, 20.0),
-        create_point_feature(2.0, 0.0, 25.0),
-    ],
-];
+### Complete Example: Elevation Contours
+
+Generate elevation contour lines from a DEM (Digital Elevation Model):
+
+```rust
+use geo_marching_squares::do_concurrent_lines;
+use geojson::{Feature, FeatureCollection, Geometry, Value};
+
+fn main() {
+    // Step 1: Load elevation data
+    let grid = load_elevation_data();
+
+    // Step 2: Define contour line elevations (every 100m)
+    let elevations = vec![0.0, 100.0, 200.0, 300.0, 400.0, 500.0];
+
+    // Step 3: Generate contour lines in parallel
+    let result: FeatureCollection = do_concurrent_lines(&grid, &elevations);
+
+    // Step 4: Process the results
+    println!("Generated {} contour lines", result.features.len());
+
+    for feature in result.features {
+        if let Some(props) = &feature.properties {
+            let elevation = props.get("isovalue").unwrap().as_f64().unwrap();
+
+            if let Some(geom) = &feature.geometry {
+                if let Value::MultiLineString(lines) = &geom.value {
+                    let total_segments: usize = lines.iter().map(|l| l.len()).sum();
+                    println!("{}m contour: {} line(s), {} points",
+                             elevation, lines.len(), total_segments);
+                }
+            }
+        }
+    }
+
+    // Save to GeoJSON file
+    let json = serde_json::to_string_pretty(&result).unwrap();
+    std::fs::write("contours.geojson", json).unwrap();
+}
+
+fn load_elevation_data() -> Vec<Vec<Feature>> {
+    // In practice, you'd read from a GeoTIFF or other DEM source
+    // Here's a simple example with synthetic data
+    let mut grid = Vec::new();
+
+    for row in 0..20 {
+        let mut row_features = Vec::new();
+        for col in 0..20 {
+            let lon = -120.0 + (col as f64 * 0.01);
+            let lat = 40.0 + (row as f64 * 0.01);
+
+            // Simulate elevation (in meters)
+            let elevation = 100.0 + ((row * row + col * col) as f64 * 2.0);
+
+            row_features.push(create_point_feature(lon, lat, elevation));
+        }
+        grid.push(row_features);
+    }
+
+    grid
+}
+```
+
+### Single Band/Line Examples
+
+For simple use cases, process a single band or line:
+
+```rust
+use geo_marching_squares::{process_band, process_line};
+
+// Single isoband: temperatures between 20-30°C
+let grid = create_temperature_grid();
+let feature = process_band(&grid, 20.0, 30.0);
+
+// Access the result
+if let Some(geom) = &feature.geometry {
+    if let Value::MultiPolygon(polygons) = &geom.value {
+        println!("Generated {} polygon(s) for 20-30°C range", polygons.len());
+    }
+}
+
+// Single isoline: 500m elevation contour
+let dem_grid = load_elevation_data();
+let contour = process_line(&dem_grid, 500.0);
+
+// Access the result
+if let Some(geom) = &contour.geometry {
+    if let Value::MultiLineString(lines) = &geom.value {
+        println!("500m contour has {} line segment(s)", lines.len());
+    }
+}
 ```
 
 ## API Reference
@@ -339,11 +427,307 @@ Input: 2D Grid of GeoJSON Point Features
 Output: GeoJSON Feature(Collection)
 ```
 
-## Advanced Usage
+## User Guide
 
-### Custom Threshold Sequences
+### Understanding Input Data Requirements
 
-Create logarithmic scales:
+The library requires a **rectangular grid** of GeoJSON Point features. Here's what you need to know:
+
+#### Grid Structure
+
+```
+Rows = Latitude dimension (North to South)
+Columns = Longitude dimension (West to East)
+
+Example 4×3 grid (4 rows, 3 columns):
+
+Row 0: [Point(0,3), Point(1,3), Point(2,3)]  <- Northernmost
+Row 1: [Point(0,2), Point(1,2), Point(2,2)]
+Row 2: [Point(0,1), Point(1,1), Point(2,1)]
+Row 3: [Point(0,0), Point(1,0), Point(2,0)]  <- Southernmost
+        ↑           ↑           ↑
+        West      Center      East
+```
+
+#### Required Feature Format
+
+Each Point feature must have:
+
+1. **Geometry**: Point with `[longitude, latitude]` coordinates
+2. **Properties**: Object with a `"value"` field containing the scalar data
+
+```json
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Point",
+    "coordinates": [-122.4194, 37.7749]
+  },
+  "properties": {
+    "value": 25.5
+  }
+}
+```
+
+#### Common Pitfalls
+
+❌ **Wrong coordinate order**: `[latitude, longitude]` (should be `[lon, lat]`)
+❌ **Missing value property**: Must be named exactly `"value"`
+❌ **Irregular grid**: All rows must have same number of columns
+❌ **Missing features**: Grid cannot have `None` values
+
+### Loading Data from Common Sources
+
+#### From CSV File
+
+```rust
+use csv::Reader;
+use geojson::{Feature, Geometry, Value, JsonObject};
+
+fn load_grid_from_csv(path: &str) -> Vec<Vec<Feature>> {
+    let mut reader = Reader::from_path(path).unwrap();
+    let mut grid_data: Vec<(f64, f64, f64)> = Vec::new();
+
+    // Read CSV: lon, lat, value
+    for result in reader.records() {
+        let record = result.unwrap();
+        let lon: f64 = record[0].parse().unwrap();
+        let lat: f64 = record[1].parse().unwrap();
+        let value: f64 = record[2].parse().unwrap();
+        grid_data.push((lon, lat, value));
+    }
+
+    // Organize into 2D grid
+    // Assumes data is already sorted by lat (desc) then lon (asc)
+    let lons: Vec<f64> = grid_data.iter()
+        .map(|(lon, _, _)| *lon)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let lats: Vec<f64> = grid_data.iter()
+        .map(|(_, lat, _)| *lat)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let mut grid = vec![vec![]; lats.len()];
+
+    for (lon, lat, value) in grid_data {
+        let lat_idx = lats.iter().position(|&l| l == lat).unwrap();
+        let lon_idx = lons.iter().position(|&l| l == lon).unwrap();
+
+        let geometry = Geometry::new(Value::Point(vec![lon, lat]));
+        let mut properties = JsonObject::new();
+        properties.insert("value".to_string(), serde_json::json!(value));
+
+        grid[lat_idx].push(Feature {
+            bbox: None,
+            geometry: Some(geometry),
+            id: None,
+            properties: Some(properties),
+            foreign_members: None,
+        });
+    }
+
+    grid
+}
+```
+
+#### From GeoJSON File
+
+```rust
+use geojson::FeatureCollection;
+use std::fs;
+
+fn load_grid_from_geojson(path: &str) -> Vec<Vec<Feature>> {
+    let geojson_str = fs::read_to_string(path).unwrap();
+    let collection: FeatureCollection = geojson_str.parse().unwrap();
+
+    // Assuming features are ordered: row by row, column by column
+    let num_cols = 10; // You need to know this from your data
+    let mut grid = Vec::new();
+    let mut current_row = Vec::new();
+
+    for (i, feature) in collection.features.into_iter().enumerate() {
+        current_row.push(feature);
+
+        if (i + 1) % num_cols == 0 {
+            grid.push(current_row);
+            current_row = Vec::new();
+        }
+    }
+
+    grid
+}
+```
+
+#### From NetCDF (Common for Weather Data)
+
+```rust
+// Using the netcdf crate
+use netcdf;
+
+fn load_grid_from_netcdf(path: &str, var_name: &str) -> Vec<Vec<Feature>> {
+    let file = netcdf::open(path).unwrap();
+
+    // Read coordinate variables
+    let lons = file.variable("lon").unwrap()
+        .values::<f64, _>(None, None).unwrap();
+    let lats = file.variable("lat").unwrap()
+        .values::<f64, _>(None, None).unwrap();
+
+    // Read data variable
+    let data = file.variable(var_name).unwrap()
+        .values::<f64, _>(None, None).unwrap();
+
+    // Build grid
+    let mut grid = Vec::new();
+
+    for (lat_idx, &lat) in lats.iter().enumerate() {
+        let mut row = Vec::new();
+        for (lon_idx, &lon) in lons.iter().enumerate() {
+            let value = data[[lat_idx, lon_idx]]; // 2D indexing
+            row.push(create_point_feature(lon, lat, value));
+        }
+        grid.push(row);
+    }
+
+    grid
+}
+```
+
+### Working with Output Data
+
+#### Accessing Polygon Coordinates
+
+```rust
+use geojson::Value;
+
+let result = do_concurrent(&grid, &thresholds);
+
+for feature in &result.features {
+    if let Some(Value::MultiPolygon(multi_poly)) = feature.geometry.as_ref().map(|g| &g.value) {
+        for (poly_idx, polygon) in multi_poly.iter().enumerate() {
+            println!("Polygon {}: {} rings", poly_idx, polygon.len());
+
+            // First ring is exterior, rest are holes
+            let exterior = &polygon[0];
+            println!("  Exterior ring: {} points", exterior.len());
+
+            for (i, coord) in exterior.iter().enumerate() {
+                let lon = coord[0];
+                let lat = coord[1];
+                println!("    Point {}: ({}, {})", i, lon, lat);
+            }
+
+            // Process holes if any
+            for (hole_idx, hole) in polygon[1..].iter().enumerate() {
+                println!("  Hole {}: {} points", hole_idx, hole.len());
+            }
+        }
+    }
+}
+```
+
+#### Accessing Line Coordinates
+
+```rust
+let result = do_concurrent_lines(&grid, &isovalues);
+
+for feature in &result.features {
+    if let Some(Value::MultiLineString(multi_line)) = feature.geometry.as_ref().map(|g| &g.value) {
+        for (line_idx, line) in multi_line.iter().enumerate() {
+            println!("Line segment {}: {} points", line_idx, line.len());
+
+            for (i, coord) in line.iter().enumerate() {
+                let lon = coord[0];
+                let lat = coord[1];
+                println!("  Point {}: ({}, {})", i, lon, lat);
+            }
+
+            // Check if line is closed (forms a loop)
+            if line.first() == line.last() {
+                println!("  This is a closed contour loop");
+            }
+        }
+    }
+}
+```
+
+#### Converting to Other Formats
+
+**To WKT (Well-Known Text):**
+
+```rust
+use geojson::Value;
+
+fn polygon_to_wkt(feature: &Feature) -> String {
+    if let Some(Value::MultiPolygon(multi_poly)) = feature.geometry.as_ref().map(|g| &g.value) {
+        let mut wkt = String::from("MULTIPOLYGON(");
+
+        for (i, polygon) in multi_poly.iter().enumerate() {
+            if i > 0 { wkt.push_str(", "); }
+            wkt.push('(');
+
+            for (j, ring) in polygon.iter().enumerate() {
+                if j > 0 { wkt.push_str(", "); }
+                wkt.push('(');
+
+                for (k, coord) in ring.iter().enumerate() {
+                    if k > 0 { wkt.push_str(", "); }
+                    wkt.push_str(&format!("{} {}", coord[0], coord[1]));
+                }
+
+                wkt.push(')');
+            }
+
+            wkt.push(')');
+        }
+
+        wkt.push(')');
+        wkt
+    } else {
+        String::new()
+    }
+}
+```
+
+**To GeoPackage (using gdal crate):**
+
+```rust
+// Using the gdal crate
+use gdal::vector::{Layer, OGRwkbGeometryType};
+use gdal::Dataset;
+
+fn save_to_gpkg(features: &[Feature], path: &str) -> gdal::errors::Result<()> {
+    let driver = gdal::DriverManager::get_driver_by_name("GPKG")?;
+    let mut dataset = driver.create_vector_only(path)?;
+
+    let mut layer = dataset.create_layer(
+        "contours",
+        None,
+        OGRwkbGeometryType::wkbMultiPolygon,
+    )?;
+
+    // Add fields
+    layer.create_field(&gdal::vector::FieldDefn::new("lower", gdal::vector::OGRFieldType::OFTReal)?)?;
+    layer.create_field(&gdal::vector::FieldDefn::new("upper", gdal::vector::OGRFieldType::OFTReal)?)?;
+
+    for feature in features {
+        // Convert GeoJSON to GDAL geometry and add to layer
+        // (implementation details depend on gdal crate version)
+    }
+
+    Ok(())
+}
+```
+
+### Advanced Usage
+
+#### Custom Threshold Sequences
+
+**Logarithmic scales** for data spanning multiple orders of magnitude:
 
 ```rust
 let thresholds: Vec<f64> = (0..10)
@@ -352,23 +736,52 @@ let thresholds: Vec<f64> = (0..10)
 // [1, 10, 100, 1000, 10000, ...]
 ```
 
-Create percentile-based bands:
+**Percentile-based bands** for even distribution:
 
 ```rust
-let values: Vec<f64> = extract_all_values(&grid);
+// Extract all values from grid
+fn extract_all_values(grid: &[Vec<Feature>]) -> Vec<f64> {
+    grid.iter()
+        .flat_map(|row| row.iter())
+        .filter_map(|f| {
+            f.properties.as_ref()
+                .and_then(|p| p.get("value"))
+                .and_then(|v| v.as_f64())
+        })
+        .collect()
+}
+
+let mut values = extract_all_values(&grid);
 values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+// Create 10 bands with equal number of data points
 let thresholds: Vec<f64> = (0..=10)
     .map(|i| values[values.len() * i / 10])
     .collect();
 ```
 
-### Filtering Empty Features
+**Equal-interval bands** with custom spacing:
 
-Filter out features with no geometry:
+```rust
+fn create_equal_intervals(min: f64, max: f64, num_bands: usize) -> Vec<f64> {
+    let interval = (max - min) / num_bands as f64;
+    (0..=num_bands)
+        .map(|i| min + (i as f64 * interval))
+        .collect()
+}
+
+let thresholds = create_equal_intervals(0.0, 100.0, 10);
+// [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+```
+
+#### Filtering and Post-Processing
+
+**Filter empty features:**
 
 ```rust
 let result = do_concurrent(&grid, &thresholds);
-let non_empty: Vec<_> = result.features.into_iter()
+
+let non_empty: Vec<Feature> = result.features.into_iter()
     .filter(|f| {
         if let Some(geom) = &f.geometry {
             if let Value::MultiPolygon(polys) = &geom.value {
@@ -378,20 +791,239 @@ let non_empty: Vec<_> = result.features.into_iter()
         false
     })
     .collect();
+
+println!("Kept {} non-empty features", non_empty.len());
 ```
 
-### Working with Properties
-
-Access band properties:
+**Filter by area threshold:**
 
 ```rust
-for feature in result.features {
-    if let Some(props) = feature.properties {
+fn polygon_area(coords: &[Vec<f64>]) -> f64 {
+    // Simple shoelace formula (assumes small polygons)
+    let mut area = 0.0;
+    for i in 0..coords.len() - 1 {
+        area += coords[i][0] * coords[i + 1][1];
+        area -= coords[i + 1][0] * coords[i][1];
+    }
+    area.abs() / 2.0
+}
+
+let min_area = 0.0001; // Minimum area threshold
+
+let filtered: Vec<Feature> = result.features.into_iter()
+    .filter(|f| {
+        if let Some(Value::MultiPolygon(polys)) = f.geometry.as_ref().map(|g| &g.value) {
+            polys.iter().any(|poly| {
+                polygon_area(&poly[0]) >= min_area
+            })
+        } else {
+            false
+        }
+    })
+    .collect();
+```
+
+**Add custom properties:**
+
+```rust
+use serde_json::json;
+
+let mut enhanced_features: Vec<Feature> = Vec::new();
+
+for (i, mut feature) in result.features.into_iter().enumerate() {
+    // Add custom properties
+    if let Some(props) = feature.properties.as_mut() {
+        props.insert("id".to_string(), json!(i));
+        props.insert("color".to_string(), json!(format!("#{:06x}", i * 0x111111)));
+        props.insert("label".to_string(), json!(format!("Band {}", i)));
+    }
+
+    enhanced_features.push(feature);
+}
+```
+
+#### Working with Properties
+
+**Access and modify band properties:**
+
+```rust
+for feature in &mut result.features {
+    if let Some(props) = &mut feature.properties {
         let lower = props.get("lower_level").unwrap().as_f64().unwrap();
         let upper = props.get("upper_level").unwrap().as_f64().unwrap();
+
+        // Add derived properties
+        props.insert("range".to_string(), json!(upper - lower));
+        props.insert("midpoint".to_string(), json!((lower + upper) / 2.0));
+
         println!("Band: [{}, {})", lower, upper);
     }
 }
+```
+
+**Extract statistics:**
+
+```rust
+use geojson::Value;
+
+fn count_polygons(features: &[Feature]) -> usize {
+    features.iter()
+        .filter_map(|f| {
+            if let Some(Value::MultiPolygon(polys)) = f.geometry.as_ref().map(|g| &g.value) {
+                Some(polys.len())
+            } else {
+                None
+            }
+        })
+        .sum()
+}
+
+fn count_total_vertices(features: &[Feature]) -> usize {
+    features.iter()
+        .filter_map(|f| {
+            if let Some(Value::MultiPolygon(polys)) = f.geometry.as_ref().map(|g| &g.value) {
+                Some(polys.iter()
+                    .flat_map(|p| p.iter())
+                    .map(|ring| ring.len())
+                    .sum::<usize>())
+            } else {
+                None
+            }
+        })
+        .sum()
+}
+
+let total_polys = count_polygons(&result.features);
+let total_verts = count_total_vertices(&result.features);
+println!("Generated {} polygons with {} vertices", total_polys, total_verts);
+```
+
+### Integration Examples
+
+#### Using with Actix-Web (REST API)
+
+```rust
+use actix_web::{web, App, HttpResponse, HttpServer};
+use geo_marching_squares::do_concurrent;
+use geojson::{Feature, FeatureCollection};
+
+#[derive(serde::Deserialize)]
+struct ContourRequest {
+    grid: Vec<Vec<Feature>>,
+    thresholds: Vec<f64>,
+}
+
+async fn generate_contours(req: web::Json<ContourRequest>) -> HttpResponse {
+    let result = do_concurrent(&req.grid, &req.thresholds);
+    HttpResponse::Ok().json(result)
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    HttpServer::new(|| {
+        App::new()
+            .route("/contours", web::post().to(generate_contours))
+    })
+    .bind("127.0.0.1:8080")?
+    .run()
+    .await
+}
+```
+
+#### Using with Leaflet (JavaScript Frontend)
+
+```javascript
+// Request contours from your Rust backend
+async function loadContours() {
+    const response = await fetch('/api/contours', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            grid: temperatureGrid,
+            thresholds: [0, 10, 20, 30, 40]
+        })
+    });
+
+    const geojson = await response.json();
+
+    // Add to Leaflet map with styling
+    L.geoJSON(geojson, {
+        style: function(feature) {
+            const lower = feature.properties.lower_level;
+            return {
+                fillColor: getColor(lower),
+                weight: 2,
+                opacity: 1,
+                color: 'white',
+                fillOpacity: 0.7
+            };
+        },
+        onEachFeature: function(feature, layer) {
+            const lower = feature.properties.lower_level;
+            const upper = feature.properties.upper_level;
+            layer.bindPopup(`Range: ${lower}°C - ${upper}°C`);
+        }
+    }).addTo(map);
+}
+
+function getColor(value) {
+    return value > 30 ? '#d73027' :
+           value > 20 ? '#fc8d59' :
+           value > 10 ? '#fee08b' :
+           value > 0  ? '#d9ef8b' :
+                        '#91bfdb';
+}
+```
+
+### Performance Optimization Tips
+
+#### 1. Use Parallel Processing
+
+Always prefer `do_concurrent` over sequential processing:
+
+```rust
+// Good: Parallel (6x faster on 8 cores)
+let result = do_concurrent(&grid, &thresholds);
+
+// Avoid: Sequential
+let features: Vec<Feature> = thresholds.windows(2)
+    .map(|w| process_band(&grid, w[0], w[1]))
+    .collect();
+```
+
+#### 2. Pre-allocate Grid Structures
+
+```rust
+// Pre-allocate with known dimensions
+let rows = 100;
+let cols = 100;
+let mut grid = Vec::with_capacity(rows);
+
+for _ in 0..rows {
+    grid.push(Vec::with_capacity(cols));
+}
+```
+
+#### 3. Reuse Grid for Multiple Analyses
+
+```rust
+let grid = load_large_grid(); // Expensive operation
+
+// Process multiple threshold sets on same grid
+let temp_bands = do_concurrent(&grid, &temp_thresholds);
+let humidity_bands = do_concurrent(&grid, &humidity_thresholds);
+```
+
+#### 4. Choose Appropriate Threshold Count
+
+More thresholds = more computation:
+
+```rust
+// Fine detail: 20 bands (slower)
+let fine = (0..=20).map(|i| i as f64 * 5.0).collect::<Vec<_>>();
+
+// Coarse detail: 5 bands (faster)
+let coarse = (0..=5).map(|i| i as f64 * 20.0).collect::<Vec<_>>();
 ```
 
 ## Comparison to Java Reference
