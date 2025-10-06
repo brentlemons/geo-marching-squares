@@ -40,9 +40,9 @@ pub struct Shape {
     /// Computed edge points (after interpolation)
     points: Vec<Point>,
 
-    /// Edges stored as inline vector (most shapes have ≤6 edges)
-    /// SmallVec avoids heap allocation for common cases, saving ~400 bytes per shape
-    edges: SmallVec<[(Point, Edge); 6]>,
+    /// Edges stored as inline vector (most shapes have ≤6 edges, but use 8 for safety margin)
+    /// SmallVec avoids heap allocation for common cases, saving ~350 bytes per shape
+    edges: SmallVec<[(Point, Edge); 8]>,
 
     /// Grid position (column, row)
     x: usize,
@@ -1854,7 +1854,7 @@ impl Shape {
         &self.points
     }
 
-    pub fn edges(&self) -> &SmallVec<[(Point, Edge); 6]> {
+    pub fn edges(&self) -> &SmallVec<[(Point, Edge); 8]> {
         &self.edges
     }
 
@@ -1933,7 +1933,12 @@ impl Shape {
     }
 
     pub fn insert_edge(&mut self, start: Point, edge: Edge) {
-        self.edges.push((start, edge));
+        // Maintain HashMap behavior: replace existing edge with same start point
+        if let Some(pos) = self.edges.iter().position(|(k, _)| k == &start) {
+            self.edges[pos] = (start, edge);
+        } else {
+            self.edges.push((start, edge));
+        }
     }
 
     pub fn corner_values(&self) -> (f64, f64, f64, f64) {
