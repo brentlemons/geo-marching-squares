@@ -304,12 +304,16 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
     let rows = data.len();
     let cols = data[0].len();
 
+    eprintln!("[geo-marching-squares] process_band_from_cells: Starting band [{}, {}) on {}x{} grid",
+        lower, upper, rows, cols);
+
     // Create cells from grid (rows-1 × cols-1)
     let mut cells: Vec<Vec<Option<Shape>>> = Vec::with_capacity(rows - 1);
     for _ in 0..rows - 1 {
         cells.push(vec![None; cols - 1]);
     }
 
+    eprintln!("[geo-marching-squares] process_band_from_cells: Creating {} cells", (rows - 1) * (cols - 1));
     for r in 0..rows - 1 {
         for c in 0..cols - 1 {
             cells[r][c] = Shape::create_from_cells(
@@ -331,6 +335,8 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
 
     let cell_rows = cells.len();
     let cell_cols = cells[0].len();
+
+    eprintln!("[geo-marching-squares] process_band_from_cells: Cells created, now walking edges");
 
     let mut hold_polygons: VecDeque<Vec<Vec<Position>>> = VecDeque::new();
 
@@ -479,6 +485,9 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
         }
     }
 
+    eprintln!("[geo-marching-squares] process_band_from_cells: Edge walking complete, building feature with {} polygons",
+        polygons.len());
+
     // Build MultiPolygon geometry
     let multi_polygon = GeoValue::MultiPolygon(polygons);
 
@@ -495,6 +504,8 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
         props.insert("lower_level".to_string(), serde_json::json!(lower));
         props.insert("upper_level".to_string(), serde_json::json!(upper));
     }
+
+    eprintln!("[geo-marching-squares] process_band_from_cells: Feature complete for band [{}, {})", lower, upper);
 
     feature
 }
@@ -610,18 +621,31 @@ pub fn do_concurrent_from_cells(
 ) -> geojson::FeatureCollection {
     use rayon::prelude::*;
 
+    eprintln!("[geo-marching-squares] do_concurrent_from_cells: Starting with {} thresholds, {} bands to generate",
+        isobands.len(), isobands.len().saturating_sub(1));
+    eprintln!("[geo-marching-squares] Grid size: {}x{} = {} cells",
+        data.len(),
+        if data.is_empty() { 0 } else { data[0].len() },
+        data.len() * if data.is_empty() { 0 } else { data[0].len() });
+
     // Process each isoband pair in parallel
     let features: Vec<Feature> = (0..isobands.len() - 1)
         .into_par_iter()
         .map(|i| {
+            eprintln!("[geo-marching-squares] Band {}/{}: Processing [{}, {})",
+                i + 1, isobands.len() - 1, isobands[i], isobands[i + 1]);
             // Each thread processes one isoband level
-            process_band_from_cells(data, isobands[i], isobands[i + 1])
+            let result = process_band_from_cells(data, isobands[i], isobands[i + 1]);
+            eprintln!("[geo-marching-squares] Band {}/{}: Completed", i + 1, isobands.len() - 1);
+            result
         })
         .filter(|feature| {
             // Filter out empty features (no geometry)
             has_coordinates(feature)
         })
         .collect();
+
+    eprintln!("[geo-marching-squares] do_concurrent_from_cells: Completed, generated {} features", features.len());
 
     // Build and return FeatureCollection
     geojson::FeatureCollection {
