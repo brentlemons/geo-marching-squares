@@ -6,19 +6,51 @@
 //! This library generates **isobands** (filled contour polygons) and **isolines** (contour lines)
 //! from 2D scalar fields using geographic coordinates (latitude/longitude).
 //!
-//! ## Example
+//! ## Examples
+//!
+//! ### Concurrent Processing (Recommended)
+//!
+//! Process multiple isoband levels in parallel for maximum performance:
 //!
 //! ```rust,ignore
-//! use geo_marching_squares::MarchingSquares;
+//! use geo_marching_squares::do_concurrent;
 //! use geojson::{Feature, FeatureCollection};
 //!
 //! // Your 2D grid of GeoJSON point features with scalar values
 //! let grid: Vec<Vec<Feature>> = load_grid_data();
 //!
-//! // Generate isobands for temperature ranges
+//! // Define isoband thresholds (creates N-1 bands from N thresholds)
 //! let thresholds = vec![0.0, 10.0, 20.0, 30.0, 40.0];
-//! let result: FeatureCollection = MarchingSquares::do_concurrent(&grid, &thresholds)?;
+//!
+//! // Generate all isobands in parallel using Rayon
+//! let result: FeatureCollection = do_concurrent(&grid, &thresholds);
+//!
+//! // Result contains 4 isobands: 0-10, 10-20, 20-30, 30-40
+//! println!("Generated {} isoband features", result.features.len());
 //! ```
+//!
+//! ### Single Isoband Processing
+//!
+//! Process a single isoband level:
+//!
+//! ```rust,ignore
+//! use geo_marching_squares::process_band;
+//! use geojson::Feature;
+//!
+//! let grid: Vec<Vec<Feature>> = load_grid_data();
+//!
+//! // Generate contour for values between 10 and 20
+//! let feature: Feature = process_band(&grid, 10.0, 20.0);
+//!
+//! // Feature contains MultiPolygon geometry with all contours for this band
+//! ```
+//!
+//! ## Performance
+//!
+//! - **Parallel processing**: Uses Rayon's work-stealing thread pool
+//! - **Embarrassingly parallel**: Each isoband computed independently
+//! - **Zero-copy**: Input grid shared across all threads (read-only)
+//! - **Efficient**: Rust's zero-cost abstractions ensure optimal performance
 
 mod point;
 mod edge;
@@ -30,7 +62,7 @@ pub use point::{Point, Side};
 pub use edge::{Edge, EdgeType, Move};
 pub use shape::{Shape, ShapeType};
 pub use cell::Cell;
-pub use marching_squares::process_band;
+pub use marching_squares::{process_band, do_concurrent};
 
 #[cfg(test)]
 mod tests {

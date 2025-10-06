@@ -272,6 +272,76 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
     feature
 }
 
+/// Check if a Feature has non-empty MultiPolygon geometry
+///
+/// Used to filter out empty results from isoband processing.
+fn has_coordinates(feature: &Feature) -> bool {
+    match &feature.geometry {
+        Some(geometry) => match &geometry.value {
+            GeoValue::MultiPolygon(polygons) => !polygons.is_empty(),
+            _ => false,
+        },
+        None => false,
+    }
+}
+
+/// Process multiple isoband levels concurrently using parallel processing
+///
+/// Takes a grid and a list of threshold values, and computes all isobands
+/// in parallel using Rayon's work-stealing thread pool. This is the primary
+/// API for generating multiple contour levels efficiently.
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GeoJSON Point features with "value" property
+/// * `isobands` - Sorted list of threshold values (e.g., [0.0, 10.0, 20.0, 30.0])
+///               Creates N-1 isobands from N threshold values
+///
+/// # Returns
+///
+/// A GeoJSON FeatureCollection containing all isoband features.
+/// Only features with non-empty geometry are included.
+/// Features may not be in order (parallel processing is non-deterministic).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::do_concurrent;
+///
+/// let grid = load_grid_data(); // Your 2D grid
+/// let thresholds = vec![0.0, 10.0, 20.0, 30.0];
+///
+/// // Creates 3 isobands: 0-10, 10-20, 20-30
+/// let result = do_concurrent(&grid, &thresholds);
+/// assert_eq!(result.features.len(), 3); // assuming all have data
+/// ```
+pub fn do_concurrent(
+    data: &[Vec<Feature>],
+    isobands: &[f64],
+) -> geojson::FeatureCollection {
+    use rayon::prelude::*;
+
+    // Process each isoband pair in parallel
+    let features: Vec<Feature> = (0..isobands.len() - 1)
+        .into_par_iter()
+        .map(|i| {
+            // Each thread processes one isoband level
+            process_band(data, isobands[i], isobands[i + 1])
+        })
+        .filter(|feature| {
+            // Filter out empty features (no geometry)
+            has_coordinates(feature)
+        })
+        .collect();
+
+    // Build and return FeatureCollection
+    geojson::FeatureCollection {
+        bbox: None,
+        foreign_members: None,
+        features,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
