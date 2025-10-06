@@ -1,7 +1,6 @@
 use crate::edge::{Edge, Move};
 use crate::point::{Point, Side};
-use smallvec::SmallVec;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 /// The geometric shape type formed by a cell configuration
 ///
@@ -40,9 +39,8 @@ pub struct Shape {
     /// Computed edge points (after interpolation)
     points: Vec<Point>,
 
-    /// Edges stored as inline vector (most shapes have ≤6 edges, but use 8 for safety margin)
-    /// SmallVec avoids heap allocation for common cases, saving ~350 bytes per shape
-    edges: SmallVec<[(Point, Edge); 8]>,
+    /// Edges keyed by start point for efficient lookup
+    edges: HashMap<Point, Edge>,
 
     /// Grid position (column, row)
     x: usize,
@@ -154,7 +152,7 @@ impl Shape {
             bottom_left,
             value,
             points: Vec::new(),
-            edges: SmallVec::new(),
+            edges: HashMap::new(),
             x,
             y,
             cleared: false,
@@ -264,7 +262,7 @@ impl Shape {
             bottom_left: bottom_left_pt,
             value,
             points: Vec::new(),
-            edges: SmallVec::new(),
+            edges: HashMap::new(),
             x,
             y,
             cleared: false,
@@ -325,41 +323,41 @@ impl Shape {
             169 | 1 => {
                 // 2221 | 0001
                 if self.bottom_edge {
-                    self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Left)));
+                    self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[0].clone(), Move::Down)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[0].clone(), Move::Down));
             }
             166 | 4 => {
                 // 2212 | 0010
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                    self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[0].clone(), Move::Right)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[0].clone(), Move::Right));
             }
             154 | 16 => {
                 // 2122 | 0100
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Up)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[0].clone(), Move::Right));
                 }
             }
             106 | 64 => {
                 // 1222 | 1000
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Left)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Up)));
+                    self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[0].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[0].clone()));
                 }
             }
             _ => {}
@@ -371,168 +369,168 @@ impl Shape {
         let pts = &self.points;
         match self.value {
             101 | 69 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right));
                 if self.right_edge {
-                    self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                    self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                    self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                    self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone())));
+                    self.edges.insert(pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone()));
                 }
             }
             149 | 21 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                    self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left)));
+                    self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right));
                 }
             }
             86 | 84 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                    self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                    self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right));
                 }
             }
             89 | 81 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                    self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                    self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right));
                 }
             }
             96 | 74 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right));
                 if self.right_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                    self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone())));
+                    self.edges.insert(pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone()));
                 }
             }
             24 | 146 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right));
                 }
             }
             6 | 164 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                    self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone())));
+                    self.edges.insert(pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone()));
                 }
-                self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right)));
+                self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right));
             }
             129 | 41 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left)));
+                    self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone())));
+                    self.edges.insert(pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone()));
                 }
             }
             66 | 104 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                    self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone())));
+                    self.edges.insert(pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone()));
                 }
             }
             144 | 26 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right));
                 }
             }
             36 | 134 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right));
                 if self.right_edge {
-                    self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                    self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone())));
+                    self.edges.insert(pts[4].clone(), Edge::new(pts[4].clone(), pts[0].clone()));
                 }
             }
             9 | 161 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                    self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone())));
+                    self.edges.insert(pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone()));
                 }
-                self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right)));
+                self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[0].clone(), Move::Right));
             }
             _ => {}
         }
@@ -544,70 +542,70 @@ impl Shape {
         match self.value {
             5 | 165 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                    self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left)));
+                    self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right));
             }
             20 | 150 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                    self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right));
                 }
             }
             80 | 90 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up)));
+                    self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right));
                 }
             }
             65 | 105 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left)));
+                    self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up)));
+                    self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[3].clone(), Edge::new(pts[3].clone(), pts[0].clone())));
+                    self.edges.insert(pts[3].clone(), Edge::new(pts[3].clone(), pts[0].clone()));
                 }
             }
             160 | 10 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right));
             }
             130 | 40 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[3].clone(), Edge::new(pts[3].clone(), pts[0].clone())));
+                    self.edges.insert(pts[3].clone(), Edge::new(pts[3].clone(), pts[0].clone()));
                 }
             }
             _ => {}
@@ -620,42 +618,42 @@ impl Shape {
         match self.value {
             168 | 2 => {
                 if self.bottom_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Down)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Down));
             }
             162 | 8 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right));
             }
             138 | 32 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right));
                 if self.right_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[3].clone(), Edge::new(pts[3].clone(), pts[0].clone())));
+                    self.edges.insert(pts[3].clone(), Edge::new(pts[3].clone(), pts[0].clone()));
                 }
             }
             42 | 128 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Left)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[3].clone(), Edge::new(pts[3].clone(), pts[0].clone())));
+                    self.edges.insert(pts[3].clone(), Edge::new(pts[3].clone(), pts[0].clone()));
                 }
             }
             _ => {}
@@ -667,99 +665,99 @@ impl Shape {
         let pts = &self.points;
         match self.value {
             37 | 133 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right));
                 if self.right_edge {
-                    self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                    self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                    self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone())));
+                    self.edges.insert(pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone()));
                 }
-                self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up)));
+                self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[5].clone(), Edge::new(pts[5].clone(), pts[0].clone())));
+                    self.edges.insert(pts[5].clone(), Edge::new(pts[5].clone(), pts[0].clone()));
                 }
             }
             148 | 22 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+                    self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone())));
+                    self.edges.insert(pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone()));
                 }
-                self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up)));
+                self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[5].clone(), Edge::new_with_move(pts[5].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[5].clone(), Edge::new_with_move(pts[5].clone(), pts[0].clone(), Move::Right));
                 }
             }
             82 | 88 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Left)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up)));
+                    self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[5].clone(), Edge::new_with_move(pts[5].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[5].clone(), Edge::new_with_move(pts[5].clone(), pts[0].clone(), Move::Right));
                 }
             }
             73 | 97 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right));
                 if self.right_edge {
-                    self.edges.push((pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone())));
+                    self.edges.insert(pts[1].clone(), Edge::new(pts[1].clone(), pts[2].clone()));
                 }
-                self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Down)));
+                self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Left)));
+                    self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up)));
+                    self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[5].clone(), Edge::new(pts[5].clone(), pts[0].clone())));
+                    self.edges.insert(pts[5].clone(), Edge::new(pts[5].clone(), pts[0].clone()));
                 }
             }
             145 | 25 => {
                 if self.right_edge {
-                    self.edges.push((pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone())));
+                    self.edges.insert(pts[0].clone(), Edge::new(pts[0].clone(), pts[1].clone()));
                 }
-                self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left)));
+                    self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Left));
                 }
                 if self.left_edge {
-                    self.edges.push((pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone())));
+                    self.edges.insert(pts[3].clone(), Edge::new(pts[3].clone(), pts[4].clone()));
                 }
-                self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up)));
+                self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up));
                 if self.top_edge {
-                    self.edges.push((pts[5].clone(), Edge::new_with_move(pts[5].clone(), pts[0].clone(), Move::Right)));
+                    self.edges.insert(pts[5].clone(), Edge::new_with_move(pts[5].clone(), pts[0].clone(), Move::Right));
                 }
             }
             70 | 100 => {
-                self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right)));
+                self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Right));
                 if self.right_edge {
-                    self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down)));
+                    self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Down));
                 }
                 if self.bottom_edge {
-                    self.edges.push((pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone())));
+                    self.edges.insert(pts[2].clone(), Edge::new(pts[2].clone(), pts[3].clone()));
                 }
-                self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Left)));
+                self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[4].clone(), Move::Left));
                 if self.left_edge {
-                    self.edges.push((pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up)));
+                    self.edges.insert(pts[4].clone(), Edge::new_with_move(pts[4].clone(), pts[5].clone(), Move::Up));
                 }
                 if self.top_edge {
-                    self.edges.push((pts[5].clone(), Edge::new(pts[5].clone(), pts[0].clone())));
+                    self.edges.insert(pts[5].clone(), Edge::new(pts[5].clone(), pts[0].clone()));
                 }
             }
             _ => {}
@@ -797,16 +795,16 @@ impl Shape {
     fn build_square_edges(&mut self) {
         let pts = &self.points;
         if self.right_edge {
-            self.edges.push((pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down)));
+            self.edges.insert(pts[0].clone(), Edge::new_with_move(pts[0].clone(), pts[1].clone(), Move::Down));
         }
         if self.bottom_edge {
-            self.edges.push((pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left)));
+            self.edges.insert(pts[1].clone(), Edge::new_with_move(pts[1].clone(), pts[2].clone(), Move::Left));
         }
         if self.left_edge {
-            self.edges.push((pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up)));
+            self.edges.insert(pts[2].clone(), Edge::new_with_move(pts[2].clone(), pts[3].clone(), Move::Up));
         }
         if self.top_edge {
-            self.edges.push((pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right)));
+            self.edges.insert(pts[3].clone(), Edge::new_with_move(pts[3].clone(), pts[0].clone(), Move::Right));
         }
     }
 
@@ -820,24 +818,24 @@ impl Shape {
             let pt1 = self.interpolate(self.upper, Side::Top);
             let pt2 = self.top_right.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Up)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Right)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Right));
             }
             if self.right_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt0.clone())));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt0.clone()));
             }
 
             let pt3 = self.interpolate(self.upper, Side::Left);
             let pt4 = self.interpolate(self.upper, Side::Bottom);
             let pt5 = self.bottom_left.clone();
 
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Down)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Left)));
+                self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Left));
             }
             if self.left_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt3)));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt3));
             }
         } else if average >= self.lower {
             let pt0 = self.interpolate(self.upper, Side::Right);
@@ -847,19 +845,19 @@ impl Shape {
             let pt4 = self.interpolate(self.upper, Side::Top);
             let pt5 = self.top_right.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Down)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Left)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Left));
             }
             if self.left_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt3.clone())));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt3.clone()));
             }
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Up)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Right)));
+                self.edges.insert(pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Right));
             }
             if self.right_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt0)));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt0));
             }
         }
     }
@@ -871,24 +869,24 @@ impl Shape {
             let pt1 = self.interpolate(self.upper, Side::Left);
             let pt2 = self.top_left.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Up)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Up));
             }
             if self.top_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt0)));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt0));
             }
 
             let pt3 = self.interpolate(self.upper, Side::Bottom);
             let pt4 = self.interpolate(self.upper, Side::Right);
             let pt5 = self.bottom_right.clone();
 
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Right)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down)));
+                self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down));
             }
             if self.bottom_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt3)));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt3));
             }
         } else if average >= self.lower {
             let pt0 = self.interpolate(self.upper, Side::Top);
@@ -898,19 +896,19 @@ impl Shape {
             let pt4 = self.interpolate(self.upper, Side::Left);
             let pt5 = self.top_left.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Down)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Down));
             }
             if self.bottom_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt3.clone())));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt3.clone()));
             }
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Left)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Up)));
+                self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Up));
             }
             if self.top_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt0)));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt0));
             }
         }
     }
@@ -925,20 +923,20 @@ impl Shape {
             let pt4 = self.interpolate(self.lower, Side::Right);
             let pt5 = self.bottom_right.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Up)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Up));
             }
             if self.top_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt0)));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt0));
             }
 
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Right)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down)));
+                self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down));
             }
             if self.bottom_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt3)));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt3));
             }
         } else if average >= self.lower && average < self.upper {
             let pt0 = self.interpolate(self.lower, Side::Top);
@@ -948,19 +946,19 @@ impl Shape {
             let pt4 = self.interpolate(self.lower, Side::Left);
             let pt5 = self.top_left.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Down)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Down));
             }
             if self.bottom_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt3.clone())));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt3.clone()));
             }
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Left)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Up)));
+                self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Up));
             }
             if self.top_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt0)));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt0));
             }
         }
     }
@@ -972,24 +970,24 @@ impl Shape {
             let pt1 = self.interpolate(self.lower, Side::Top);
             let pt2 = self.top_right.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Up)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Right)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Right));
             }
             if self.right_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt0)));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt0));
             }
 
             let pt3 = self.interpolate(self.lower, Side::Left);
             let pt4 = self.interpolate(self.lower, Side::Bottom);
             let pt5 = self.bottom_left.clone();
 
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Down)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Left)));
+                self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Left));
             }
             if self.left_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt3)));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt3));
             }
         } else if average >= self.lower && average < self.upper {
             let pt0 = self.interpolate(self.lower, Side::Right);
@@ -999,20 +997,20 @@ impl Shape {
             let pt4 = self.interpolate(self.lower, Side::Top);
             let pt5 = self.top_right.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Down)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Left)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Left));
             }
             if self.left_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt3.clone())));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt3.clone()));
             }
 
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Up)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Right)));
+                self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Right));
             }
             if self.right_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt0)));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt0));
             }
         }
     }
@@ -1025,13 +1023,13 @@ impl Shape {
             let pt2 = self.interpolate(self.upper, Side::Left);
             let pt3 = self.interpolate(self.upper, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt0)));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt0));
             }
 
             let pt4 = self.interpolate(self.upper, Side::Right);
@@ -1039,13 +1037,13 @@ impl Shape {
             let pt6 = self.interpolate(self.lower, Side::Bottom);
             let pt7 = self.interpolate(self.lower, Side::Right);
 
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt6.clone())));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt6.clone()));
             }
-            self.edges.push((pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Right)));
+            self.edges.insert(pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt7.clone(), Edge::new(pt7, pt4)));
+                self.edges.insert(pt7.clone(), Edge::new(pt7, pt4));
             }
         } else if average >= self.upper {
             let pt0 = self.interpolate(self.lower, Side::Top);
@@ -1053,13 +1051,13 @@ impl Shape {
             let pt2 = self.interpolate(self.upper, Side::Right);
             let pt3 = self.interpolate(self.upper, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt0)));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt0));
             }
 
             let pt4 = self.interpolate(self.lower, Side::Bottom);
@@ -1067,13 +1065,13 @@ impl Shape {
             let pt6 = self.interpolate(self.upper, Side::Left);
             let pt7 = self.interpolate(self.upper, Side::Bottom);
 
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Left)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt6.clone())));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt6.clone()));
             }
-            self.edges.push((pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Down)));
+            self.edges.insert(pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt7.clone(), Edge::new(pt7, pt4)));
+                self.edges.insert(pt7.clone(), Edge::new(pt7, pt4));
             }
         } else {
             let pt0 = self.interpolate(self.lower, Side::Top);
@@ -1085,21 +1083,21 @@ impl Shape {
             let pt6 = self.interpolate(self.upper, Side::Left);
             let pt7 = self.interpolate(self.upper, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt4.clone())));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt4.clone()));
             }
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Left)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt6.clone())));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt6.clone()));
             }
-            self.edges.push((pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Up)));
+            self.edges.insert(pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt7.clone(), Edge::new(pt7, pt0)));
+                self.edges.insert(pt7.clone(), Edge::new(pt7, pt0));
             }
         }
     }
@@ -1112,13 +1110,13 @@ impl Shape {
             let pt2 = self.interpolate(self.lower, Side::Left);
             let pt3 = self.interpolate(self.lower, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt0)));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt0));
             }
 
             let pt4 = self.interpolate(self.lower, Side::Right);
@@ -1126,13 +1124,13 @@ impl Shape {
             let pt6 = self.interpolate(self.upper, Side::Bottom);
             let pt7 = self.interpolate(self.upper, Side::Right);
 
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt6.clone())));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt6.clone()));
             }
-            self.edges.push((pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Right)));
+            self.edges.insert(pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt7.clone(), Edge::new(pt7, pt4)));
+                self.edges.insert(pt7.clone(), Edge::new(pt7, pt4));
             }
         } else if average < self.lower {
             let pt0 = self.interpolate(self.upper, Side::Top);
@@ -1140,13 +1138,13 @@ impl Shape {
             let pt2 = self.interpolate(self.lower, Side::Right);
             let pt3 = self.interpolate(self.lower, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt0)));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt0));
             }
 
             let pt4 = self.interpolate(self.upper, Side::Bottom);
@@ -1154,13 +1152,13 @@ impl Shape {
             let pt6 = self.interpolate(self.lower, Side::Left);
             let pt7 = self.interpolate(self.lower, Side::Bottom);
 
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Left)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt6.clone())));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt6.clone()));
             }
-            self.edges.push((pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Down)));
+            self.edges.insert(pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt7.clone(), Edge::new(pt7, pt4)));
+                self.edges.insert(pt7.clone(), Edge::new(pt7, pt4));
             }
         } else {
             let pt0 = self.interpolate(self.upper, Side::Top);
@@ -1172,21 +1170,21 @@ impl Shape {
             let pt6 = self.interpolate(self.lower, Side::Left);
             let pt7 = self.interpolate(self.lower, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt4.clone())));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt4.clone()));
             }
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Left)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt5.clone(), Edge::new(pt5, pt6.clone())));
+                self.edges.insert(pt5.clone(), Edge::new(pt5, pt6.clone()));
             }
-            self.edges.push((pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Up)));
+            self.edges.insert(pt6.clone(), Edge::new_with_move(pt6, pt7.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt7.clone(), Edge::new(pt7, pt0)));
+                self.edges.insert(pt7.clone(), Edge::new(pt7, pt0));
             }
         }
     }
@@ -1198,12 +1196,12 @@ impl Shape {
             let pt1 = self.interpolate(self.upper, Side::Top);
             let pt2 = self.top_right.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Up)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Right)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Right));
             }
             if self.right_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt0)));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt0));
             }
 
             let pt3 = self.interpolate(self.lower, Side::Bottom);
@@ -1211,13 +1209,13 @@ impl Shape {
             let pt5 = self.interpolate(self.upper, Side::Left);
             let pt6 = self.interpolate(self.upper, Side::Bottom);
 
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Left)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt4.clone(), Edge::new(pt4, pt5.clone())));
+                self.edges.insert(pt4.clone(), Edge::new(pt4, pt5.clone()));
             }
-            self.edges.push((pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Down)));
+            self.edges.insert(pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt3)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt3));
             }
         } else {
             let pt0 = self.interpolate(self.upper, Side::Right);
@@ -1228,20 +1226,20 @@ impl Shape {
             let pt5 = self.interpolate(self.upper, Side::Top);
             let pt6 = self.top_right.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Down)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Left)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt4.clone())));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt4.clone()));
             }
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Up)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Right)));
+                self.edges.insert(pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Right));
             }
             if self.right_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt0)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt0));
             }
         }
     }
@@ -1253,12 +1251,12 @@ impl Shape {
             let pt1 = self.interpolate(self.lower, Side::Top);
             let pt2 = self.top_right.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Up)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Right)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Right));
             }
             if self.right_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt0)));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt0));
             }
 
             let pt3 = self.interpolate(self.upper, Side::Bottom);
@@ -1266,13 +1264,13 @@ impl Shape {
             let pt5 = self.interpolate(self.lower, Side::Left);
             let pt6 = self.interpolate(self.lower, Side::Bottom);
 
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Left)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt4.clone(), Edge::new(pt4, pt5.clone())));
+                self.edges.insert(pt4.clone(), Edge::new(pt4, pt5.clone()));
             }
-            self.edges.push((pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Down)));
+            self.edges.insert(pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt3)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt3));
             }
         } else {
             let pt0 = self.interpolate(self.lower, Side::Right);
@@ -1283,20 +1281,20 @@ impl Shape {
             let pt5 = self.interpolate(self.lower, Side::Top);
             let pt6 = self.top_right.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Down)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Left)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt4.clone())));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt4.clone()));
             }
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Up)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Right)));
+                self.edges.insert(pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Right));
             }
             if self.right_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt0)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt0));
             }
         }
     }
@@ -1309,25 +1307,25 @@ impl Shape {
             let pt2 = self.interpolate(self.upper, Side::Right);
             let pt3 = self.interpolate(self.upper, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt0)));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt0));
             }
 
             let pt4 = self.interpolate(self.upper, Side::Left);
             let pt5 = self.interpolate(self.upper, Side::Bottom);
             let pt6 = self.bottom_left.clone();
 
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Left)));
+                self.edges.insert(pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Left));
             }
             if self.left_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt4)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt4));
             }
         } else {
             let pt0 = self.interpolate(self.lower, Side::Top);
@@ -1338,20 +1336,20 @@ impl Shape {
             let pt5 = self.interpolate(self.upper, Side::Left);
             let pt6 = self.interpolate(self.upper, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Left)));
+                self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Left));
             }
             if self.left_edge {
-                self.edges.push((pt4.clone(), Edge::new(pt4, pt5.clone())));
+                self.edges.insert(pt4.clone(), Edge::new(pt4, pt5.clone()));
             }
-            self.edges.push((pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Up)));
+            self.edges.insert(pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt0)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt0));
             }
         }
     }
@@ -1364,25 +1362,25 @@ impl Shape {
             let pt2 = self.interpolate(self.lower, Side::Right);
             let pt3 = self.interpolate(self.lower, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt0)));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt0));
             }
 
             let pt4 = self.interpolate(self.lower, Side::Left);
             let pt5 = self.interpolate(self.lower, Side::Bottom);
             let pt6 = self.bottom_left.clone();
 
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Left)));
+                self.edges.insert(pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Left));
             }
             if self.left_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt4)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt4));
             }
         } else {
             let pt0 = self.interpolate(self.upper, Side::Top);
@@ -1393,20 +1391,20 @@ impl Shape {
             let pt5 = self.interpolate(self.lower, Side::Left);
             let pt6 = self.interpolate(self.lower, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Left)));
+                self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Left));
             }
             if self.left_edge {
-                self.edges.push((pt4.clone(), Edge::new(pt4, pt5.clone())));
+                self.edges.insert(pt4.clone(), Edge::new(pt4, pt5.clone()));
             }
-            self.edges.push((pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Up)));
+            self.edges.insert(pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt0)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt0));
             }
         }
     }
@@ -1418,12 +1416,12 @@ impl Shape {
             let pt1 = self.interpolate(self.upper, Side::Left);
             let pt2 = self.top_left.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Up)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Up));
             }
             if self.top_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt0)));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt0));
             }
 
             let pt3 = self.interpolate(self.lower, Side::Right);
@@ -1431,13 +1429,13 @@ impl Shape {
             let pt5 = self.interpolate(self.upper, Side::Bottom);
             let pt6 = self.interpolate(self.upper, Side::Right);
 
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Down)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt4.clone(), Edge::new(pt4, pt5.clone())));
+                self.edges.insert(pt4.clone(), Edge::new(pt4, pt5.clone()));
             }
-            self.edges.push((pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Right)));
+            self.edges.insert(pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt3)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt3));
             }
         } else {
             let pt0 = self.interpolate(self.upper, Side::Top);
@@ -1448,20 +1446,20 @@ impl Shape {
             let pt5 = self.interpolate(self.upper, Side::Left);
             let pt6 = self.top_left.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt4.clone())));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt4.clone()));
             }
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Left)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Up)));
+                self.edges.insert(pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Up));
             }
             if self.top_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt0)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt0));
             }
         }
     }
@@ -1473,12 +1471,12 @@ impl Shape {
             let pt1 = self.interpolate(self.lower, Side::Left);
             let pt2 = self.top_left.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Up)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Up));
             }
             if self.top_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt0)));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt0));
             }
 
             let pt3 = self.interpolate(self.upper, Side::Right);
@@ -1486,13 +1484,13 @@ impl Shape {
             let pt5 = self.interpolate(self.lower, Side::Bottom);
             let pt6 = self.interpolate(self.lower, Side::Right);
 
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Down)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3.clone(), pt4.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt4.clone(), Edge::new(pt4, pt5.clone())));
+                self.edges.insert(pt4.clone(), Edge::new(pt4, pt5.clone()));
             }
-            self.edges.push((pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Right)));
+            self.edges.insert(pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt3)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt3));
             }
         } else {
             let pt0 = self.interpolate(self.lower, Side::Top);
@@ -1503,20 +1501,20 @@ impl Shape {
             let pt5 = self.interpolate(self.lower, Side::Left);
             let pt6 = self.top_left.clone();
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Down));
             if self.bottom_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt4.clone())));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt4.clone()));
             }
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Left)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4, pt5.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Up)));
+                self.edges.insert(pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Up));
             }
             if self.top_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt0)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt0));
             }
         }
     }
@@ -1529,25 +1527,25 @@ impl Shape {
             let pt2 = self.interpolate(self.lower, Side::Left);
             let pt3 = self.interpolate(self.lower, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt0)));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt0));
             }
 
             let pt4 = self.interpolate(self.upper, Side::Bottom);
             let pt5 = self.interpolate(self.upper, Side::Right);
             let pt6 = self.bottom_right.clone();
 
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Right)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Down)));
+                self.edges.insert(pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Down));
             }
             if self.bottom_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt4)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt4));
             }
         } else {
             let pt0 = self.interpolate(self.upper, Side::Top);
@@ -1558,20 +1556,20 @@ impl Shape {
             let pt5 = self.interpolate(self.lower, Side::Left);
             let pt6 = self.interpolate(self.lower, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Down)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Down));
             }
             if self.bottom_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt3.clone())));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt3.clone()));
             }
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Left)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt4.clone(), Edge::new(pt4, pt5.clone())));
+                self.edges.insert(pt4.clone(), Edge::new(pt4, pt5.clone()));
             }
-            self.edges.push((pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Up)));
+            self.edges.insert(pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt0)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt0));
             }
         }
     }
@@ -1584,25 +1582,25 @@ impl Shape {
             let pt2 = self.interpolate(self.upper, Side::Left);
             let pt3 = self.interpolate(self.upper, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt1.clone(), Edge::new(pt1, pt2.clone())));
+                self.edges.insert(pt1.clone(), Edge::new(pt1, pt2.clone()));
             }
-            self.edges.push((pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up)));
+            self.edges.insert(pt2.clone(), Edge::new_with_move(pt2, pt3.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt3.clone(), Edge::new(pt3, pt0)));
+                self.edges.insert(pt3.clone(), Edge::new(pt3, pt0));
             }
 
             let pt4 = self.interpolate(self.lower, Side::Bottom);
             let pt5 = self.interpolate(self.lower, Side::Right);
             let pt6 = self.bottom_right.clone();
 
-            self.edges.push((pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Right)));
+            self.edges.insert(pt4.clone(), Edge::new_with_move(pt4.clone(), pt5.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Down)));
+                self.edges.insert(pt5.clone(), Edge::new_with_move(pt5.clone(), pt6.clone(), Move::Down));
             }
             if self.bottom_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt4)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt4));
             }
         } else {
             let pt0 = self.interpolate(self.lower, Side::Top);
@@ -1613,20 +1611,20 @@ impl Shape {
             let pt5 = self.interpolate(self.upper, Side::Left);
             let pt6 = self.interpolate(self.upper, Side::Top);
 
-            self.edges.push((pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right)));
+            self.edges.insert(pt0.clone(), Edge::new_with_move(pt0.clone(), pt1.clone(), Move::Right));
             if self.right_edge {
-                self.edges.push((pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Down)));
+                self.edges.insert(pt1.clone(), Edge::new_with_move(pt1.clone(), pt2.clone(), Move::Down));
             }
             if self.bottom_edge {
-                self.edges.push((pt2.clone(), Edge::new(pt2, pt3.clone())));
+                self.edges.insert(pt2.clone(), Edge::new(pt2, pt3.clone()));
             }
-            self.edges.push((pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Left)));
+            self.edges.insert(pt3.clone(), Edge::new_with_move(pt3, pt4.clone(), Move::Left));
             if self.left_edge {
-                self.edges.push((pt4.clone(), Edge::new(pt4, pt5.clone())));
+                self.edges.insert(pt4.clone(), Edge::new(pt4, pt5.clone()));
             }
-            self.edges.push((pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Up)));
+            self.edges.insert(pt5.clone(), Edge::new_with_move(pt5, pt6.clone(), Move::Up));
             if self.top_edge {
-                self.edges.push((pt6.clone(), Edge::new(pt6, pt0)));
+                self.edges.insert(pt6.clone(), Edge::new(pt6, pt0));
             }
         }
     }
@@ -1749,8 +1747,8 @@ impl Shape {
         let mut slim: Vec<Point> = eight_points.into_iter().flatten().collect();
 
         // Remove duplicates (Java uses distinct())
-        let mut seen = HashSet::new();
-        slim.retain(|p| seen.insert(p.clone()));
+        let mut seen = HashMap::new();
+        slim.retain(|p| seen.insert(p.clone(), ()).is_none());
 
         // Interpolate points that need it
         for point in &mut slim {
@@ -1823,7 +1821,7 @@ impl Shape {
             bottom_left,
             value,
             points: Vec::new(),
-            edges: SmallVec::new(),
+            edges: HashMap::new(),
             x,
             y,
             cleared: false,
@@ -1854,13 +1852,13 @@ impl Shape {
         &self.points
     }
 
-    pub fn edges(&self) -> &SmallVec<[(Point, Edge); 8]> {
+    pub fn edges(&self) -> &HashMap<Point, Edge> {
         &self.edges
     }
 
     pub fn get_edges(&self, start: Option<&Point>) -> Vec<Edge> {
         if self.edges.len() <= 1 {
-            return self.edges.iter().map(|(_, e)| e.clone()).collect();
+            return self.edges.values().cloned().collect();
         }
 
         let mut result = Vec::new();
@@ -1869,19 +1867,16 @@ impl Shape {
             None => {
                 self.points
                     .iter()
-                    .find(|p| self.edges.iter().any(|(k, _)| k == *p))
+                    .find(|p| self.edges.contains_key(p))
                     .cloned()
                     .unwrap_or_else(|| self.points[0].clone())
             }
         };
 
-        while result.len() < self.edges.len() {
-            if let Some((_, edge)) = self.edges.iter().find(|(k, _)| k == &current) {
-                current = edge.end().clone();
-                result.push(edge.clone());
-            } else {
-                break;
-            }
+        while self.edges.contains_key(&current) && result.len() < self.edges.len() {
+            let edge = self.edges.get(&current).unwrap().clone();
+            current = edge.end().clone();
+            result.push(edge);
         }
 
         result
@@ -1923,9 +1918,7 @@ impl Shape {
     }
 
     pub fn remove_edge(&mut self, key: &Point) {
-        if let Some(pos) = self.edges.iter().position(|(k, _)| k == key) {
-            self.edges.remove(pos);
-        }
+        self.edges.remove(key);
     }
 
     pub fn set_points(&mut self, points: Vec<Point>) {
@@ -1933,12 +1926,7 @@ impl Shape {
     }
 
     pub fn insert_edge(&mut self, start: Point, edge: Edge) {
-        // Maintain HashMap behavior: replace existing edge with same start point
-        if let Some(pos) = self.edges.iter().position(|(k, _)| k == &start) {
-            self.edges[pos] = (start, edge);
-        } else {
-            self.edges.push((start, edge));
-        }
+        self.edges.insert(start, edge);
     }
 
     pub fn corner_values(&self) -> (f64, f64, f64, f64) {
