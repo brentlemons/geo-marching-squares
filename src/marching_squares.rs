@@ -17,6 +17,52 @@ fn round_coord(value: f64) -> f64 {
     (value * 100000.0).round() / 100000.0
 }
 
+/// Bounding box for spatial optimization of polygon nesting
+#[derive(Debug, Clone)]
+struct BBox {
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+}
+
+impl BBox {
+    /// Compute bounding box from polygon ring (exterior ring)
+    fn from_ring(ring: &[Position]) -> Self {
+        let mut min_x = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut min_y = f64::INFINITY;
+        let mut max_y = f64::NEG_INFINITY;
+
+        for point in ring {
+            min_x = min_x.min(point[0]);
+            max_x = max_x.max(point[0]);
+            min_y = min_y.min(point[1]);
+            max_y = max_y.max(point[1]);
+        }
+
+        Self { min_x, max_x, min_y, max_y }
+    }
+
+    /// Check if this bbox is completely inside another bbox
+    /// Fast check before expensive point-in-polygon test
+    fn is_inside(&self, other: &BBox) -> bool {
+        self.min_x >= other.min_x
+            && self.max_x <= other.max_x
+            && self.min_y >= other.min_y
+            && self.max_y <= other.max_y
+    }
+
+    /// Check if two bboxes don't overlap at all
+    /// Fast rejection before expensive polygon tests
+    fn disjoint(&self, other: &BBox) -> bool {
+        self.max_x < other.min_x
+            || self.min_x > other.max_x
+            || self.max_y < other.min_y
+            || self.min_y > other.max_y
+    }
+}
+
 /// Test if a polygon is completely contained within another polygon
 ///
 /// Uses point-in-polygon ray-casting algorithm.
@@ -203,22 +249,34 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
         }
     }
 
-    // Resolve polygon nesting (exterior vs interior rings)
+    // Resolve polygon nesting (exterior vs interior rings) with spatial optimization
+    // Pre-compute bounding boxes for all polygons to avoid expensive polygon-in-polygon tests
     let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
+    let mut polygon_bboxes: Vec<BBox> = Vec::new();
 
     while let Some(subject) = hold_polygons.pop_front() {
+        let subject_bbox = BBox::from_ring(&subject[0]);
         let mut external = true;
 
         for i in (0..polygons.len()).rev() {
+            let polygon_bbox = &polygon_bboxes[i];
+
+            // Fast rejection: if bboxes don't overlap, skip expensive polygon test
+            if subject_bbox.disjoint(polygon_bbox) {
+                continue;
+            }
+
             let polygon = &polygons[i];
             let mut push_out = false;
 
             // Case 1: subject is inside polygon
-            if polygon_in_polygon(&subject, polygon) {
+            // Only test if bbox could be inside
+            if subject_bbox.is_inside(polygon_bbox) && polygon_in_polygon(&subject, polygon) {
                 // Check if subject is in a hole (should be pushed out)
                 for j in 1..polygon.len() {
-                    let hole = &polygon[j..j + 1];
-                    if polygon_in_polygon(&subject, &[hole[0].clone()]) {
+                    let hole = &polygon[j];
+                    let hole_bbox = BBox::from_ring(hole);
+                    if subject_bbox.is_inside(&hole_bbox) && polygon_in_polygon(&subject, &[hole.clone()]) {
                         push_out = true;
                         break;
                     }
@@ -226,7 +284,9 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
 
                 if !push_out {
                     // Add subject as interior ring (hole) to polygon
-                    let mut new_polygon = polygon.clone();
+                    // Avoid full clone by using Vec::with_capacity + extend
+                    let mut new_polygon = Vec::with_capacity(polygon.len() + 1);
+                    new_polygon.extend_from_slice(polygon);
                     new_polygon.push(subject[0].clone());
                     polygons[i] = new_polygon;
                     external = false;
@@ -234,23 +294,26 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
                 }
             }
             // Case 2: polygon is inside subject
-            else if polygon_in_polygon(polygon, &subject) {
+            // Only test if bbox could contain polygon
+            else if polygon_bbox.is_inside(&subject_bbox) && polygon_in_polygon(polygon, &subject) {
                 // Break apart polygon and reprocess
                 if polygon.len() > 1 {
-                    // Has interior rings
-                    for j in 1..polygon.len() {
-                        hold_polygons.push_back(vec![polygon[j].clone()]);
+                    // Has interior rings - push them back for reprocessing
+                    for hole in &polygon[1..] {
+                        hold_polygons.push_back(vec![hole.clone()]);
                     }
                     hold_polygons.push_back(vec![polygon[0].clone()]);
                 } else {
                     hold_polygons.push_back(polygon.clone());
                 }
                 polygons.remove(i);
+                polygon_bboxes.remove(i);
             }
         }
 
         if external {
             polygons.push(subject);
+            polygon_bboxes.push(subject_bbox);
         }
     }
 
@@ -434,22 +497,34 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
         }
     }
 
-    // Resolve polygon nesting (exterior vs interior rings)
+    // Resolve polygon nesting (exterior vs interior rings) with spatial optimization
+    // Pre-compute bounding boxes for all polygons to avoid expensive polygon-in-polygon tests
     let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
+    let mut polygon_bboxes: Vec<BBox> = Vec::new();
 
     while let Some(subject) = hold_polygons.pop_front() {
+        let subject_bbox = BBox::from_ring(&subject[0]);
         let mut external = true;
 
         for i in (0..polygons.len()).rev() {
+            let polygon_bbox = &polygon_bboxes[i];
+
+            // Fast rejection: if bboxes don't overlap, skip expensive polygon test
+            if subject_bbox.disjoint(polygon_bbox) {
+                continue;
+            }
+
             let polygon = &polygons[i];
             let mut push_out = false;
 
             // Case 1: subject is inside polygon
-            if polygon_in_polygon(&subject, polygon) {
+            // Only test if bbox could be inside
+            if subject_bbox.is_inside(polygon_bbox) && polygon_in_polygon(&subject, polygon) {
                 // Check if subject is in a hole (should be pushed out)
                 for j in 1..polygon.len() {
-                    let hole = &polygon[j..j + 1];
-                    if polygon_in_polygon(&subject, &[hole[0].clone()]) {
+                    let hole = &polygon[j];
+                    let hole_bbox = BBox::from_ring(hole);
+                    if subject_bbox.is_inside(&hole_bbox) && polygon_in_polygon(&subject, &[hole.clone()]) {
                         push_out = true;
                         break;
                     }
@@ -457,7 +532,9 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
 
                 if !push_out {
                     // Add subject as interior ring (hole) to polygon
-                    let mut new_polygon = polygon.clone();
+                    // Avoid full clone by using Vec::with_capacity + extend
+                    let mut new_polygon = Vec::with_capacity(polygon.len() + 1);
+                    new_polygon.extend_from_slice(polygon);
                     new_polygon.push(subject[0].clone());
                     polygons[i] = new_polygon;
                     external = false;
@@ -465,23 +542,26 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
                 }
             }
             // Case 2: polygon is inside subject
-            else if polygon_in_polygon(polygon, &subject) {
+            // Only test if bbox could contain polygon
+            else if polygon_bbox.is_inside(&subject_bbox) && polygon_in_polygon(polygon, &subject) {
                 // Break apart polygon and reprocess
                 if polygon.len() > 1 {
-                    // Has interior rings
-                    for j in 1..polygon.len() {
-                        hold_polygons.push_back(vec![polygon[j].clone()]);
+                    // Has interior rings - push them back for reprocessing
+                    for hole in &polygon[1..] {
+                        hold_polygons.push_back(vec![hole.clone()]);
                     }
                     hold_polygons.push_back(vec![polygon[0].clone()]);
                 } else {
                     hold_polygons.push_back(polygon.clone());
                 }
                 polygons.remove(i);
+                polygon_bboxes.remove(i);
             }
         }
 
         if external {
             polygons.push(subject);
+            polygon_bboxes.push(subject_bbox);
         }
     }
 
