@@ -1,9 +1,11 @@
 //! Main marching squares algorithm implementation
 //!
 //! This module implements the core algorithm that converts a 2D grid of
-//! GeoJSON features into contour polygons (isobands).
+//! GeoJSON features into contour polygons (isobands) and contour lines (isolines).
 
+use crate::cell::Cell;
 use crate::edge::{Edge, Move};
+use crate::isoline_assembler::IsolineAssembler;
 use crate::shape::Shape;
 use geojson::{Feature, Geometry, JsonObject, Position, Value as GeoValue};
 use std::collections::VecDeque;
@@ -335,6 +337,148 @@ pub fn do_concurrent(
         .collect();
 
     // Build and return FeatureCollection
+    geojson::FeatureCollection {
+        bbox: None,
+        foreign_members: None,
+        features,
+    }
+}
+
+/// Check if a Feature has non-empty MultiLineString geometry
+///
+/// Used to filter out empty results from isoline processing.
+fn has_line_coordinates(feature: &Feature) -> bool {
+    match &feature.geometry {
+        Some(geometry) => match &geometry.value {
+            GeoValue::MultiLineString(lines) => !lines.is_empty(),
+            _ => false,
+        },
+        None => false,
+    }
+}
+
+/// Process a single isoline (contour line) level
+///
+/// Generates contour lines at the specified threshold value using binary
+/// classification. Returns a Feature with MultiLineString geometry containing
+/// all contour line segments for this level.
+///
+/// Unlike isobands which use ternary classification and cosine interpolation,
+/// isolines use binary classification and linear interpolation.
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GeoJSON Point features with "value" property
+/// * `isovalue` - Threshold value for the contour line
+///
+/// # Returns
+///
+/// A GeoJSON Feature containing:
+/// - MultiLineString geometry with all contour lines
+/// - Property: "isovalue" with the threshold value
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::process_line;
+///
+/// let grid = load_grid_data();
+/// let feature = process_line(&grid, 15.0);
+/// // Returns Feature with MultiLineString geometry
+/// ```
+pub fn process_line(data: &[Vec<Feature>], isovalue: f64) -> Feature {
+    let rows = data.len();
+    let cols = data[0].len();
+
+    // Create cells from grid (binary classification)
+    let mut cells: Vec<Vec<Option<Cell>>> = Vec::with_capacity(rows - 1);
+    for _ in 0..rows - 1 {
+        cells.push(vec![None; cols - 1]);
+    }
+
+    for r in 0..rows - 1 {
+        for c in 0..cols - 1 {
+            cells[r][c] = Cell::create(
+                &data[r][c],
+                &data[r][c + 1],
+                &data[r + 1][c + 1],
+                &data[r + 1][c],
+                isovalue,
+            );
+        }
+    }
+
+    // Assemble line segments into polylines
+    let mut assembler = IsolineAssembler::new();
+
+    for r in 0..cells.len() {
+        for c in 0..cells[0].len() {
+            if let Some(cell) = &cells[r][c] {
+                let segments = cell.get_line_segments();
+                assembler.add_cell_segments(r, c, segments);
+            }
+        }
+    }
+
+    let polylines = assembler.assemble();
+
+    // Build MultiLineString geometry
+    let multi_linestring = GeoValue::MultiLineString(polylines);
+
+    // Create Feature with properties
+    let mut feature = Feature {
+        bbox: None,
+        geometry: Some(Geometry::new(multi_linestring)),
+        id: None,
+        properties: Some(JsonObject::new()),
+        foreign_members: None,
+    };
+
+    if let Some(props) = feature.properties.as_mut() {
+        props.insert("isovalue".to_string(), serde_json::json!(isovalue));
+    }
+
+    feature
+}
+
+/// Process multiple isoline levels concurrently using parallel processing
+///
+/// Takes a grid and a list of threshold values, and computes all isolines
+/// in parallel using Rayon's work-stealing thread pool.
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GeoJSON Point features with "value" property
+/// * `isovalues` - List of threshold values for contour lines
+///
+/// # Returns
+///
+/// A GeoJSON FeatureCollection containing all isoline features.
+/// Only features with non-empty geometry are included.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::do_concurrent_lines;
+///
+/// let grid = load_grid_data();
+/// let isovalues = vec![0.0, 10.0, 20.0, 30.0];
+///
+/// // Creates 4 isolines at values 0, 10, 20, and 30
+/// let result = do_concurrent_lines(&grid, &isovalues);
+/// ```
+pub fn do_concurrent_lines(
+    data: &[Vec<Feature>],
+    isovalues: &[f64],
+) -> geojson::FeatureCollection {
+    use rayon::prelude::*;
+
+    let features: Vec<Feature> = isovalues
+        .par_iter()
+        .map(|&isovalue| process_line(data, isovalue))
+        .filter(|feature| has_line_coordinates(feature))
+        .collect();
+
     geojson::FeatureCollection {
         bbox: None,
         foreign_members: None,

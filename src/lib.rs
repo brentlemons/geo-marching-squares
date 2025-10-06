@@ -45,10 +45,39 @@
 //! // Feature contains MultiPolygon geometry with all contours for this band
 //! ```
 //!
+//! ## Isolines (Contour Lines)
+//!
+//! Generate contour lines at specific threshold values:
+//!
+//! ```rust,ignore
+//! use geo_marching_squares::{process_line, do_concurrent_lines};
+//!
+//! let grid = load_grid_data();
+//!
+//! // Single isoline at value 15.0
+//! let feature = process_line(&grid, 15.0);
+//! // Returns Feature with MultiLineString geometry
+//!
+//! // Multiple isolines in parallel
+//! let isovalues = vec![0.0, 10.0, 20.0, 30.0];
+//! let collection = do_concurrent_lines(&grid, &isovalues);
+//! // Returns FeatureCollection with 4 isoline features
+//! ```
+//!
+//! ### Isolines vs Isobands
+//!
+//! | Feature | Isolines | Isobands |
+//! |---------|----------|----------|
+//! | **Classification** | Binary (above/below) | Ternary (below/within/above) |
+//! | **Configurations** | 16 possible (2^4) | 81 possible (3^4) |
+//! | **Geometry** | MultiLineString | MultiPolygon |
+//! | **Interpolation** | Linear | Cosine-smoothed |
+//! | **Output** | Contour lines | Filled regions |
+//!
 //! ## Performance
 //!
 //! - **Parallel processing**: Uses Rayon's work-stealing thread pool
-//! - **Embarrassingly parallel**: Each isoband computed independently
+//! - **Embarrassingly parallel**: Each level computed independently
 //! - **Zero-copy**: Input grid shared across all threads (read-only)
 //! - **Efficient**: Rust's zero-cost abstractions ensure optimal performance
 
@@ -56,13 +85,14 @@ mod point;
 mod edge;
 mod shape;
 mod cell;
+mod isoline_assembler;
 mod marching_squares;
 
 pub use point::{Point, Side};
 pub use edge::{Edge, EdgeType, Move};
 pub use shape::{Shape, ShapeType};
-pub use cell::Cell;
-pub use marching_squares::{process_band, do_concurrent};
+pub use cell::{Cell, LineSegment};
+pub use marching_squares::{process_band, do_concurrent, process_line, do_concurrent_lines};
 
 #[cfg(test)]
 mod tests {
