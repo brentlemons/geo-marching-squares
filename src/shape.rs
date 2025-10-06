@@ -136,7 +136,15 @@ impl Shape {
 
             153 | 102 | 68 | 17 | 136 | 34 | 152 | 18 | 137 | 33 | 98 | 72 | 38 | 132 => ShapeType::Saddle,
 
-            85 => ShapeType::Square,
+            85 => {
+                // Square: all corners within band
+                // Interior squares (not on grid boundary) have no edges and don't contribute to polygons
+                // Only create shape if on boundary (needed for polygon closure at grid edges)
+                if !top_edge && !right_edge && !bottom_edge && !left_edge {
+                    return None;  // Interior square, saves ~900 bytes per cell
+                }
+                ShapeType::Square
+            }
 
             _ => {
                 eprintln!("Unknown shape value: {}", value);
@@ -246,7 +254,15 @@ impl Shape {
 
             153 | 102 | 68 | 17 | 136 | 34 | 152 | 18 | 137 | 33 | 98 | 72 | 38 | 132 => ShapeType::Saddle,
 
-            85 => ShapeType::Square,
+            85 => {
+                // Square: all corners within band
+                // Interior squares (not on grid boundary) have no edges and don't contribute to polygons
+                // Only create shape if on boundary (needed for polygon closure at grid edges)
+                if !top_edge && !right_edge && !bottom_edge && !left_edge {
+                    return None;  // Interior square, saves ~900 bytes per cell
+                }
+                ShapeType::Square
+            }
 
             _ => {
                 eprintln!("Unknown shape value: {}", value);
