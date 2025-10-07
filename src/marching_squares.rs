@@ -569,13 +569,23 @@ fn walk_polygon_recursive(
     // Flood fill to find all interior cells (with polygon containment check)
     let interior_cells = flood_fill_interior(cells, interior_start, &boundary_cells, &exterior_ring);
 
+    // Debug: log interior cells found
+    if !interior_cells.is_empty() {
+        eprintln!("[geo-marching-squares] Found {} interior cells for polygon at ({}, {})",
+            interior_cells.len(), start_r, start_c);
+    }
+
     // Recursively process any holes (unprocessed cells with shapes inside)
     let mut holes = Vec::new();
+    let mut holes_found = 0;
     for (r, c) in interior_cells {
         if !processed.contains(&(r, c)) {
             if let Some(cell) = &cells[r][c] {
                 if !cell.is_cleared() {
                     // Found a hole! Recursively walk it
+                    holes_found += 1;
+                    eprintln!("[geo-marching-squares] Processing hole {} at ({}, {}) inside polygon ({}, {})",
+                        holes_found, r, c, start_r, start_c);
                     let hole_polygon = walk_polygon_recursive(cells, r, c, processed);
                     // Take only the exterior ring of the hole (index 0)
                     if !hole_polygon.is_empty() {
@@ -584,6 +594,11 @@ fn walk_polygon_recursive(
                 }
             }
         }
+    }
+
+    if holes_found > 0 {
+        eprintln!("[geo-marching-squares] Polygon at ({}, {}) has {} holes",
+            start_r, start_c, holes.len());
     }
 
     // Build polygon: [exterior, hole1, hole2, ...]
