@@ -283,10 +283,9 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
             // Only test if bbox could be inside
             if subject_bbox.is_inside(polygon_bbox) && polygon_in_polygon(&subject, polygon) {
                 // Check if subject is in a hole (should be pushed out)
-                for j in 1..polygon.len() {
-                    let hole = &polygon[j];
+                for hole in polygon.iter().skip(1) {
                     let hole_bbox = BBox::from_ring(hole);
-                    if subject_bbox.is_inside(&hole_bbox) && polygon_in_polygon(&subject, &[hole.clone()]) {
+                    if subject_bbox.is_inside(&hole_bbox) && polygon_in_polygon(&subject, std::slice::from_ref(hole)) {
                         push_out = true;
                         break;
                     }
@@ -316,8 +315,10 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
                 } else {
                     hold_polygons.push_back(polygon.clone());
                 }
-                polygons.remove(i);
-                polygon_bboxes.remove(i);
+                // O(1) swap_remove instead of O(N) remove
+                // Safe because we iterate in reverse - swapped element is beyond current index
+                polygons.swap_remove(i);
+                polygon_bboxes.swap_remove(i);
             }
         }
 
@@ -326,6 +327,9 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
             polygon_bboxes.push(subject_bbox);
         }
     }
+    let nesting_elapsed = nesting_start.elapsed();
+    eprintln!("[geo-marching-squares] ⏱️  Polygon Nesting Resolution: {:?} ({} final polygons)",
+        nesting_elapsed, polygons.len());
 
     // Build MultiPolygon geometry
     let multi_polygon = GeoValue::MultiPolygon(polygons);
@@ -545,10 +549,9 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
             // Only test if bbox could be inside
             if subject_bbox.is_inside(polygon_bbox) && polygon_in_polygon(&subject, polygon) {
                 // Check if subject is in a hole (should be pushed out)
-                for j in 1..polygon.len() {
-                    let hole = &polygon[j];
+                for hole in polygon.iter().skip(1) {
                     let hole_bbox = BBox::from_ring(hole);
-                    if subject_bbox.is_inside(&hole_bbox) && polygon_in_polygon(&subject, &[hole.clone()]) {
+                    if subject_bbox.is_inside(&hole_bbox) && polygon_in_polygon(&subject, std::slice::from_ref(hole)) {
                         push_out = true;
                         break;
                     }
@@ -578,8 +581,10 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
                 } else {
                     hold_polygons.push_back(polygon.clone());
                 }
-                polygons.remove(i);
-                polygon_bboxes.remove(i);
+                // O(1) swap_remove instead of O(N) remove
+                // Safe because we iterate in reverse - swapped element is beyond current index
+                polygons.swap_remove(i);
+                polygon_bboxes.swap_remove(i);
             }
         }
 
