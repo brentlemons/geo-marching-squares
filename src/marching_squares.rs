@@ -705,9 +705,9 @@ fn walk_polygon_recursive(
     eprintln!("[geo-marching-squares] Polygon at ({}, {}) winding: {}, orientation: {} (high={}, low={}, edges={})",
         start_r, start_c, winding, orientation_str, high_side_count, low_side_count, exterior_ring.len());
 
-    // EXPERIMENTAL: Only process clockwise polygons
-    if winding == "counter-clockwise" {
-        eprintln!("[geo-marching-squares] SKIPPING counter-clockwise polygon at ({}, {})", start_r, start_c);
+    // EXPERIMENTAL: Only process counter-clockwise polygons
+    if winding == "clockwise" {
+        eprintln!("[geo-marching-squares] SKIPPING clockwise polygon at ({}, {})", start_r, start_c);
         return vec![];
     }
 
