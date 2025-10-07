@@ -705,6 +705,12 @@ fn walk_polygon_recursive(
     eprintln!("[geo-marching-squares] Polygon at ({}, {}) winding: {}, orientation: {} (high={}, low={}, edges={})",
         start_r, start_c, winding, orientation_str, high_side_count, low_side_count, exterior_ring.len());
 
+    // EXPERIMENTAL: Only process clockwise polygons
+    if winding == "counter-clockwise" {
+        eprintln!("[geo-marching-squares] SKIPPING counter-clockwise polygon at ({}, {})", start_r, start_c);
+        return vec![];
+    }
+
     // Step into polygon to find interior starting cell
     let interior_start = step_into_polygon(&last_move, y, x, rows, cols);
 
