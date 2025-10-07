@@ -452,10 +452,106 @@ fn point_in_ring(point: &[f64], ring: &[Position]) -> bool {
     inside
 }
 
-/// Recursively walk a polygon and its holes
+/// Polygon orientation classification based on side-detection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PolygonOrientation {
+    Exterior,  // Inside band is outside the polygon (typical exterior ring)
+    Hole,      // Inside band is inside the polygon (typical hole)
+    Uncertain, // Cannot determine from side-detection alone
+}
+
+/// Check if a grid cell value is "inside band" (between lower and upper thresholds)
+fn is_inside_band(value: f64, lower: f64, upper: f64) -> bool {
+    value >= lower && value < upper
+}
+
+/// Perform side-detection for a single edge during polygon walking
+/// Returns (high_side_score, low_side_score) based on which side has "inside band" values
+///
+/// Logic per edge direction:
+/// - Right edge: high side is below (r+1), low side is above (r)
+/// - Down edge: high side is left (c-1), low side is right (c)
+/// - Left edge: high side is above (r), low side is below (r+1)
+/// - Up edge: high side is right (c), low side is left (c-1)
+fn detect_edge_side(
+    grid_data: &[Vec<crate::GridCell>],
+    lower: f64,
+    upper: f64,
+    cell_r: usize,
+    cell_c: usize,
+    move_dir: &Move,
+) -> (i32, i32) {
+    let grid_rows = grid_data.len();
+    let grid_cols = if grid_rows > 0 { grid_data[0].len() } else { 0 };
+
+    match move_dir {
+        Move::Right => {
+            // Moving right: check cell below (high side) and current cell row (low side)
+            let high = if cell_r + 2 < grid_rows && cell_c + 1 < grid_cols {
+                is_inside_band(grid_data[cell_r + 2][cell_c + 1].value, lower, upper)
+            } else {
+                false
+            };
+            let low = if cell_c + 1 < grid_cols {
+                is_inside_band(grid_data[cell_r][cell_c + 1].value, lower, upper)
+            } else {
+                false
+            };
+            (if high { 1 } else { 0 }, if low { 1 } else { 0 })
+        }
+        Move::Down => {
+            // Moving down: check cell to left (high side) and current cell column (low side)
+            let high = if cell_r + 1 < grid_rows && cell_c > 0 {
+                is_inside_band(grid_data[cell_r + 1][cell_c].value, lower, upper)
+            } else {
+                false
+            };
+            let low = if cell_r + 1 < grid_rows && cell_c + 1 < grid_cols {
+                is_inside_band(grid_data[cell_r + 1][cell_c + 1].value, lower, upper)
+            } else {
+                false
+            };
+            (if high { 1 } else { 0 }, if low { 1 } else { 0 })
+        }
+        Move::Left => {
+            // Moving left: check cell above (high side) and current cell row (low side)
+            let high = if cell_r > 0 {
+                is_inside_band(grid_data[cell_r][cell_c].value, lower, upper)
+            } else {
+                false
+            };
+            let low = if cell_r + 2 < grid_rows {
+                is_inside_band(grid_data[cell_r + 2][cell_c].value, lower, upper)
+            } else {
+                false
+            };
+            (if high { 1 } else { 0 }, if low { 1 } else { 0 })
+        }
+        Move::Up => {
+            // Moving up: check cell to right (high side) and current cell column (low side)
+            let high = if cell_r > 0 && cell_c + 1 < grid_cols {
+                is_inside_band(grid_data[cell_r][cell_c + 1].value, lower, upper)
+            } else {
+                false
+            };
+            let low = if cell_r > 0 && cell_c > 0 {
+                is_inside_band(grid_data[cell_r][cell_c].value, lower, upper)
+            } else {
+                false
+            };
+            (if high { 1 } else { 0 }, if low { 1 } else { 0 })
+        }
+        Move::Unknown => (0, 0),
+    }
+}
+
+/// Recursively walk a polygon and detect its orientation using side-detection
 /// Returns a polygon structure: [exterior_ring, hole1, hole2, ...]
 fn walk_polygon_recursive(
     cells: &mut Vec<Vec<Option<Shape>>>,
+    grid_data: &[Vec<crate::GridCell>],
+    lower: f64,
+    upper: f64,
     start_r: usize,
     start_c: usize,
     processed: &mut std::collections::HashSet<(usize, usize)>,
@@ -473,6 +569,10 @@ fn walk_polygon_recursive(
     let mut go_on = true;
     let mut current_edge: Option<Edge> = None;
     let mut last_move = Move::Unknown;
+
+    // Side-detection: track which side of edges has "inside band" values
+    let mut high_side_count = 0i32;  // Inside band on "high" side (right/below)
+    let mut low_side_count = 0i32;   // Inside band on "low" side (left/above)
 
     // Walk edges to close the loop
     while go_on {
@@ -502,6 +602,12 @@ fn walk_polygon_recursive(
         for edge in tmp_edges {
             cell_ref.remove_edge(edge.start());
             last_move = *edge.move_direction();
+
+            // Side-detection: accumulate scores for each edge (before edge is moved)
+            let (high, low) = detect_edge_side(grid_data, lower, upper, y, x, edge.move_direction());
+            high_side_count += high;
+            low_side_count += low;
+
             current_edge = Some(edge.clone());
             edges.push(edge);
 
@@ -581,8 +687,23 @@ fn walk_polygon_recursive(
         "unknown"
     };
 
-    eprintln!("[geo-marching-squares] Polygon at ({}, {}) winding: {} ({} edges)",
-        start_r, start_c, winding, exterior_ring.len());
+    // Classify polygon orientation using side-detection
+    let orientation = if high_side_count > low_side_count * 3 / 2 {
+        PolygonOrientation::Exterior
+    } else if low_side_count > high_side_count * 3 / 2 {
+        PolygonOrientation::Hole
+    } else {
+        PolygonOrientation::Uncertain
+    };
+
+    let orientation_str = match orientation {
+        PolygonOrientation::Exterior => "EXTERIOR",
+        PolygonOrientation::Hole => "HOLE",
+        PolygonOrientation::Uncertain => "UNCERTAIN",
+    };
+
+    eprintln!("[geo-marching-squares] Polygon at ({}, {}) winding: {}, orientation: {} (high={}, low={}, edges={})",
+        start_r, start_c, winding, orientation_str, high_side_count, low_side_count, exterior_ring.len());
 
     // Step into polygon to find interior starting cell
     let interior_start = step_into_polygon(&last_move, y, x, rows, cols);
@@ -607,7 +728,7 @@ fn walk_polygon_recursive(
                     holes_found += 1;
                     eprintln!("[geo-marching-squares] Processing hole {} at ({}, {}) inside polygon ({}, {})",
                         holes_found, r, c, start_r, start_c);
-                    let hole_polygon = walk_polygon_recursive(cells, r, c, processed);
+                    let hole_polygon = walk_polygon_recursive(cells, grid_data, lower, upper, r, c, processed);
                     // Take only the exterior ring of the hole (index 0)
                     if !hole_polygon.is_empty() {
                         holes.push(hole_polygon[0].clone());
@@ -710,7 +831,7 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
                 if let Some(cell) = &cells[r][c] {
                     if !cell.is_cleared() {
                         // Found an unprocessed polygon - recursively walk it and its holes
-                        let polygon = walk_polygon_recursive(&mut cells, r, c, &mut processed);
+                        let polygon = walk_polygon_recursive(&mut cells, data, lower, upper, r, c, &mut processed);
                         if !polygon.is_empty() && !polygon[0].is_empty() {
                             polygons.push(polygon);
                         }
