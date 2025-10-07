@@ -376,11 +376,12 @@ fn step_into_polygon(last_move: &Move, current_r: usize, current_c: usize, rows:
 }
 
 /// Flood fill to find all cells inside a closed polygon boundary
-/// Uses BFS starting from an interior cell
+/// Uses BFS starting from an interior cell with polygon containment check
 fn flood_fill_interior(
     cells: &[Vec<Option<Shape>>],
     start: Option<(usize, usize)>,
     boundary_cells: &std::collections::HashSet<(usize, usize)>,
+    polygon_ring: &[Position],
 ) -> std::collections::HashSet<(usize, usize)> {
     use std::collections::{HashSet, VecDeque};
 
@@ -415,12 +416,40 @@ fn flood_fill_interior(
                 continue;
             }
 
+            // Check if cell center is actually inside the polygon
+            // Cell center is at (r + 0.5, c + 0.5)
+            let cell_center = [nr as f64 + 0.5, nc as f64 + 0.5];
+            if !point_in_ring(&cell_center, polygon_ring) {
+                continue;
+            }
+
             interior.insert((nr, nc));
             queue.push_back((nr, nc));
         }
     }
 
     interior
+}
+
+/// Check if a point is inside a polygon ring using ray casting
+fn point_in_ring(point: &[f64], ring: &[Position]) -> bool {
+    let mut inside = false;
+    let mut j = ring.len() - 1;
+
+    for i in 0..ring.len() {
+        let one = &ring[i];
+        let two = &ring[j];
+
+        if ((one[1] > point[1]) != (two[1] > point[1]))
+            && (point[0] < (two[0] - one[0]) * (point[1] - one[1]) / (two[1] - one[1]) + one[0])
+        {
+            inside = !inside;
+        }
+
+        j = i;
+    }
+
+    inside
 }
 
 /// Recursively walk a polygon and its holes
@@ -537,8 +566,8 @@ fn walk_polygon_recursive(
     // Step into polygon to find interior starting cell
     let interior_start = step_into_polygon(&last_move, y, x, rows, cols);
 
-    // Flood fill to find all interior cells
-    let interior_cells = flood_fill_interior(cells, interior_start, &boundary_cells);
+    // Flood fill to find all interior cells (with polygon containment check)
+    let interior_cells = flood_fill_interior(cells, interior_start, &boundary_cells, &exterior_ring);
 
     // Recursively process any holes (unprocessed cells with shapes inside)
     let mut holes = Vec::new();
