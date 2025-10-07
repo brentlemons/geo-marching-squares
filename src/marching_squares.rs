@@ -563,6 +563,27 @@ fn walk_polygon_recursive(
         }
     }
 
+    // Detect winding direction using shoelace formula (signed area)
+    let winding = if exterior_ring.len() >= 3 {
+        let mut signed_area = 0.0;
+        let n = exterior_ring.len();
+        for i in 0..n {
+            let j = (i + 1) % n;
+            signed_area += exterior_ring[i][0] * exterior_ring[j][1];
+            signed_area -= exterior_ring[j][0] * exterior_ring[i][1];
+        }
+        if signed_area > 0.0 {
+            "counter-clockwise"
+        } else {
+            "clockwise"
+        }
+    } else {
+        "unknown"
+    };
+
+    eprintln!("[geo-marching-squares] Polygon at ({}, {}) winding: {} ({} edges)",
+        start_r, start_c, winding, exterior_ring.len());
+
     // Step into polygon to find interior starting cell
     let interior_start = step_into_polygon(&last_move, y, x, rows, cols);
 
