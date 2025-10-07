@@ -351,6 +351,218 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
     feature
 }
 
+/// Determine which cell to step into from the polygon boundary
+/// Based on the last edge's move direction, step perpendicular inward
+fn step_into_polygon(last_move: &Move, current_r: usize, current_c: usize, rows: usize, cols: usize) -> Option<(usize, usize)> {
+    match last_move {
+        Move::Right => {
+            // Moving right, interior is below (down)
+            if current_r + 1 < rows { Some((current_r + 1, current_c)) } else { None }
+        }
+        Move::Down => {
+            // Moving down, interior is to the left
+            if current_c > 0 { Some((current_r, current_c - 1)) } else { None }
+        }
+        Move::Left => {
+            // Moving left, interior is above (up)
+            if current_r > 0 { Some((current_r - 1, current_c)) } else { None }
+        }
+        Move::Up => {
+            // Moving up, interior is to the right
+            if current_c + 1 < cols { Some((current_r, current_c + 1)) } else { None }
+        }
+        Move::Unknown => None,
+    }
+}
+
+/// Flood fill to find all cells inside a closed polygon boundary
+/// Uses BFS starting from an interior cell
+fn flood_fill_interior(
+    cells: &[Vec<Option<Shape>>],
+    start: Option<(usize, usize)>,
+    boundary_cells: &std::collections::HashSet<(usize, usize)>,
+) -> std::collections::HashSet<(usize, usize)> {
+    use std::collections::{HashSet, VecDeque};
+
+    let mut interior = HashSet::new();
+    let mut queue = VecDeque::new();
+
+    if let Some(start_pos) = start {
+        queue.push_back(start_pos);
+        interior.insert(start_pos);
+    }
+
+    let rows = cells.len();
+    let cols = if rows > 0 { cells[0].len() } else { 0 };
+
+    while let Some((r, c)) = queue.pop_front() {
+        // Add neighbors to queue (4-connected)
+        let neighbors = [
+            (r.wrapping_sub(1), c), // up
+            (r + 1, c),              // down
+            (r, c.wrapping_sub(1)),  // left
+            (r, c + 1),              // right
+        ];
+
+        for (nr, nc) in neighbors {
+            // Bounds check
+            if nr >= rows || nc >= cols {
+                continue;
+            }
+
+            // Already visited or on boundary
+            if interior.contains(&(nr, nc)) || boundary_cells.contains(&(nr, nc)) {
+                continue;
+            }
+
+            interior.insert((nr, nc));
+            queue.push_back((nr, nc));
+        }
+    }
+
+    interior
+}
+
+/// Recursively walk a polygon and its holes
+/// Returns a polygon structure: [exterior_ring, hole1, hole2, ...]
+fn walk_polygon_recursive(
+    cells: &mut Vec<Vec<Option<Shape>>>,
+    start_r: usize,
+    start_c: usize,
+    processed: &mut std::collections::HashSet<(usize, usize)>,
+) -> Vec<Vec<Position>> {
+    use std::collections::HashSet;
+
+    let rows = cells.len();
+    let cols = if rows > 0 { cells[0].len() } else { 0 };
+
+    // Track cells we visit while walking this polygon's boundary
+    let mut boundary_cells = HashSet::new();
+    let mut edges = Vec::new();
+    let mut y = start_r;
+    let mut x = start_c;
+    let mut go_on = true;
+    let mut current_edge: Option<Edge> = None;
+    let mut last_move = Move::Unknown;
+
+    // Walk edges to close the loop
+    while go_on {
+        if y >= rows || x >= cols {
+            break;
+        }
+
+        boundary_cells.insert((y, x));
+
+        let cell_ref = match cells[y][x].as_mut() {
+            Some(cell) => cell,
+            None => break,
+        };
+
+        let tmp_edges = if let Some(ref edge) = current_edge {
+            cell_ref.get_edges(Some(edge.end()))
+        } else {
+            cell_ref.get_edges(None)
+        };
+
+        if tmp_edges.is_empty() {
+            break;
+        }
+
+        cell_ref.increment_used_edges(tmp_edges.len());
+
+        for edge in tmp_edges {
+            cell_ref.remove_edge(edge.start());
+            last_move = *edge.move_direction();
+            current_edge = Some(edge.clone());
+            edges.push(edge);
+
+            // Check if loop closed
+            if current_edge.as_ref().unwrap().end() == edges[0].start() {
+                go_on = false;
+                break;
+            }
+        }
+
+        if !go_on {
+            break;
+        }
+
+        // Move to next cell based on edge direction
+        if let Some(ref edge) = current_edge {
+            match edge.move_direction() {
+                Move::Right => x += 1,
+                Move::Down => y += 1,
+                Move::Left => {
+                    if x > 0 {
+                        x -= 1
+                    } else {
+                        go_on = false;
+                    }
+                }
+                Move::Up => {
+                    if y > 0 {
+                        y -= 1
+                    } else {
+                        go_on = false;
+                    }
+                }
+                Move::Unknown => {
+                    go_on = false;
+                }
+            }
+        }
+    }
+
+    // Mark boundary cells as processed
+    for cell in &boundary_cells {
+        processed.insert(*cell);
+    }
+
+    // Convert edges to exterior ring
+    let mut exterior_ring: Vec<Position> = Vec::new();
+    if !edges.is_empty() {
+        exterior_ring.push(vec![
+            round_coord(edges[0].start().x().unwrap()),
+            round_coord(edges[0].start().y().unwrap()),
+        ]);
+
+        for edge in &edges {
+            exterior_ring.push(vec![
+                round_coord(edge.end().x().unwrap()),
+                round_coord(edge.end().y().unwrap()),
+            ]);
+        }
+    }
+
+    // Step into polygon to find interior starting cell
+    let interior_start = step_into_polygon(&last_move, y, x, rows, cols);
+
+    // Flood fill to find all interior cells
+    let interior_cells = flood_fill_interior(cells, interior_start, &boundary_cells);
+
+    // Recursively process any holes (unprocessed cells with shapes inside)
+    let mut holes = Vec::new();
+    for (r, c) in interior_cells {
+        if !processed.contains(&(r, c)) {
+            if let Some(cell) = &cells[r][c] {
+                if !cell.is_cleared() {
+                    // Found a hole! Recursively walk it
+                    let hole_polygon = walk_polygon_recursive(cells, r, c, processed);
+                    // Take only the exterior ring of the hole (index 0)
+                    if !hole_polygon.is_empty() {
+                        holes.push(hole_polygon[0].clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Build polygon: [exterior, hole1, hole2, ...]
+    let mut polygon = vec![exterior_ring];
+    polygon.extend(holes);
+    polygon
+}
+
 /// Process a single isoband level from GridCell data (memory-efficient)
 ///
 /// This is the high-performance alternative to `process_band()` for large grids.
@@ -419,185 +631,35 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
     eprintln!("[geo-marching-squares] ⏱️  Shape Classification: {:?}", classification_elapsed);
     eprintln!("[geo-marching-squares] process_band_from_cells: Cells created, now walking edges");
 
-    let edge_walking_start = std::time::Instant::now();
-    let mut hold_polygons: VecDeque<Vec<Vec<Position>>> = VecDeque::new();
-    let mut cells_with_shapes = 0;
-    let mut total_edges_found = 0;
+    // Recursive polygon walking with automatic hole detection
+    let recursive_start = std::time::Instant::now();
+    let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
+    let mut processed = std::collections::HashSet::new();
 
-    // Walk edges to form polygons
+    eprintln!("[geo-marching-squares] process_band_from_cells: Walking edges with recursive hole detection");
+
+    // Walk grid in order, recursively processing polygons and their holes
     for r in 0..cell_rows {
         for c in 0..cell_cols {
-            if let Some(cell) = &mut cells[r][c] {
-                cells_with_shapes += 1;
-                if !cell.is_cleared() {
-                    let mut y = r;
-                    let mut x = c;
-                    let mut go_on = true;
-                    let mut edges = Vec::new();
-                    let mut current_edge: Option<Edge> = None;
-
-                    while go_on {
-                        let cell_ref = cells[y][x].as_mut().unwrap();
-
-                        let tmp_edges = if let Some(ref edge) = current_edge {
-                            cell_ref.get_edges(Some(edge.end()))
-                        } else {
-                            cell_ref.get_edges(None)
-                        };
-
-                        if tmp_edges.is_empty() {
-                            break;
+            if !processed.contains(&(r, c)) {
+                if let Some(cell) = &cells[r][c] {
+                    if !cell.is_cleared() {
+                        // Found an unprocessed polygon - recursively walk it and its holes
+                        let polygon = walk_polygon_recursive(&mut cells, r, c, &mut processed);
+                        if !polygon.is_empty() && !polygon[0].is_empty() {
+                            polygons.push(polygon);
                         }
-
-                        cell_ref.increment_used_edges(tmp_edges.len());
-
-                        for edge in tmp_edges {
-                            cell_ref.remove_edge(edge.start());
-                            current_edge = Some(edge.clone());
-                            edges.push(edge);
-
-                            // Check if loop closed
-                            if current_edge.as_ref().unwrap().end() == edges[0].start() {
-                                go_on = false;
-                                break;
-                            }
-                        }
-
-                        if !go_on {
-                            break;
-                        }
-
-                        // Move to next cell based on edge direction
-                        if let Some(ref edge) = current_edge {
-                            match edge.move_direction() {
-                                Move::Right => x += 1,
-                                Move::Down => y += 1,
-                                Move::Left => {
-                                    if x > 0 {
-                                        x -= 1
-                                    } else {
-                                        go_on = false;
-                                    }
-                                }
-                                Move::Up => {
-                                    if y > 0 {
-                                        y -= 1
-                                    } else {
-                                        go_on = false;
-                                    }
-                                }
-                                Move::Unknown => {
-                                    go_on = false;
-                                    eprintln!("Unknown edge move at ({}, {})", y, x);
-                                }
-                            }
-                        }
-                    }
-
-                    // Convert edges to polygon coordinates
-                    if !edges.is_empty() {
-                        total_edges_found += edges.len();
-                        let mut ring: Vec<Position> = Vec::new();
-
-                        // Add first edge's start point
-                        ring.push(vec![
-                            round_coord(edges[0].start().x().unwrap()),
-                            round_coord(edges[0].start().y().unwrap()),
-                        ]);
-
-                        // Add all end points
-                        for edge in &edges {
-                            ring.push(vec![
-                                round_coord(edge.end().x().unwrap()),
-                                round_coord(edge.end().y().unwrap()),
-                            ]);
-                        }
-
-                        hold_polygons.push_back(vec![ring]);
                     }
                 }
             }
         }
     }
 
-    let edge_walking_elapsed = edge_walking_start.elapsed();
-    eprintln!("[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} shapes, {} total edges, {} polygons)",
-        edge_walking_elapsed, cells_with_shapes, total_edges_found, hold_polygons.len());
+    let recursive_elapsed = recursive_start.elapsed();
+    eprintln!("[geo-marching-squares] ⏱️  Recursive Edge Walking + Hole Detection: {:?} ({} final polygons)",
+        recursive_elapsed, polygons.len());
 
-    // Resolve polygon nesting (exterior vs interior rings) with spatial optimization
-    let nesting_start = std::time::Instant::now();
-    // Pre-compute bounding boxes for all polygons to avoid expensive polygon-in-polygon tests
-    let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
-    let mut polygon_bboxes: Vec<BBox> = Vec::new();
-
-    while let Some(subject) = hold_polygons.pop_front() {
-        let subject_bbox = BBox::from_ring(&subject[0]);
-        let mut external = true;
-
-        for i in (0..polygons.len()).rev() {
-            let polygon_bbox = &polygon_bboxes[i];
-
-            // Fast rejection: if bboxes don't overlap, skip expensive polygon test
-            if subject_bbox.disjoint(polygon_bbox) {
-                continue;
-            }
-
-            let polygon = &polygons[i];
-            let mut push_out = false;
-
-            // Case 1: subject is inside polygon
-            // Only test if bbox could be inside
-            if subject_bbox.is_inside(polygon_bbox) && polygon_in_polygon(&subject, polygon) {
-                // Check if subject is in a hole (should be pushed out)
-                for hole in polygon.iter().skip(1) {
-                    let hole_bbox = BBox::from_ring(hole);
-                    if subject_bbox.is_inside(&hole_bbox) && polygon_in_polygon(&subject, std::slice::from_ref(hole)) {
-                        push_out = true;
-                        break;
-                    }
-                }
-
-                if !push_out {
-                    // Add subject as interior ring (hole) to polygon
-                    // Avoid full clone by using Vec::with_capacity + extend
-                    let mut new_polygon = Vec::with_capacity(polygon.len() + 1);
-                    new_polygon.extend_from_slice(polygon);
-                    new_polygon.push(subject[0].clone());
-                    polygons[i] = new_polygon;
-                    external = false;
-                    break;
-                }
-            }
-            // Case 2: polygon is inside subject
-            // Only test if bbox could contain polygon
-            else if polygon_bbox.is_inside(&subject_bbox) && polygon_in_polygon(polygon, &subject) {
-                // Break apart polygon and reprocess
-                if polygon.len() > 1 {
-                    // Has interior rings - push them back for reprocessing
-                    for hole in &polygon[1..] {
-                        hold_polygons.push_back(vec![hole.clone()]);
-                    }
-                    hold_polygons.push_back(vec![polygon[0].clone()]);
-                } else {
-                    hold_polygons.push_back(polygon.clone());
-                }
-                // O(1) swap_remove instead of O(N) remove
-                // Safe because we iterate in reverse - swapped element is beyond current index
-                polygons.swap_remove(i);
-                polygon_bboxes.swap_remove(i);
-            }
-        }
-
-        if external {
-            polygons.push(subject);
-            polygon_bboxes.push(subject_bbox);
-        }
-    }
-    let nesting_elapsed = nesting_start.elapsed();
-    eprintln!("[geo-marching-squares] ⏱️  Polygon Nesting Resolution: {:?} ({} final polygons)",
-        nesting_elapsed, polygons.len());
-
-    eprintln!("[geo-marching-squares] process_band_from_cells: Edge walking complete, building feature with {} polygons",
+    eprintln!("[geo-marching-squares] process_band_from_cells: Polygon processing complete, building feature with {} polygons",
         polygons.len());
 
     // Build MultiPolygon geometry
