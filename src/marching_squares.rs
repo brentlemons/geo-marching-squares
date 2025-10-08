@@ -509,11 +509,14 @@ struct PolygonMeta {
 /// 3. For each clockwise polygon at root level, attach its holes
 /// 4. Nested clockwise polygons (islands in holes) become separate polygons
 fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec<Position>>> {
+    let hierarchy_start = std::time::Instant::now();
+
     if raw_polygons.is_empty() {
         return vec![];
     }
 
     // Step 1: Build metadata for all polygons (just exterior rings)
+    let metadata_start = std::time::Instant::now();
     let metas: Vec<PolygonMeta> = raw_polygons
         .into_iter()
         .enumerate()
@@ -531,15 +534,18 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
             })
         })
         .collect();
+    let metadata_elapsed = metadata_start.elapsed();
 
-    eprintln!("[geo-marching-squares] Building hierarchy for {} polygons ({} CW, {} CCW)",
-        metas.len(),
-        metas.iter().filter(|m| m.is_clockwise).count(),
-        metas.iter().filter(|m| !m.is_clockwise).count()
-    );
+    let cw_count = metas.iter().filter(|m| m.is_clockwise).count();
+    let ccw_count = metas.iter().filter(|m| !m.is_clockwise).count();
+    eprintln!("[geo-marching-squares]   ⏱️  Metadata (bbox+winding): {:?} for {} polygons ({} CW, {} CCW)",
+        metadata_elapsed, metas.len(), cw_count, ccw_count);
 
     // Step 2: Find container for each counter-clockwise polygon (holes)
+    let hole_containment_start = std::time::Instant::now();
     let mut hole_containers: Vec<Option<usize>> = vec![None; metas.len()];
+    let mut bbox_checks = 0usize;
+    let mut pip_checks = 0usize;
 
     for i in 0..metas.len() {
         if !metas[i].is_clockwise {
@@ -552,11 +558,13 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
                     continue; // Skip self and other holes
                 }
 
+                bbox_checks += 1;
                 // Quick bbox check first
                 if !metas[i].bbox.is_inside(&metas[j].bbox) {
                     continue;
                 }
 
+                pip_checks += 1;
                 // Point-in-polygon check - test first point of hole against container
                 if metas[i].ring.len() > 0 && polygon_contains_point(&metas[j].ring, &metas[i].ring[0]) {
                     // This clockwise polygon contains the hole
@@ -571,13 +579,19 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
 
             hole_containers[i] = best_container;
             if best_container.is_none() {
-                eprintln!("[geo-marching-squares] WARNING: Counter-clockwise polygon {} has no container", i);
+                eprintln!("[geo-marching-squares]   WARNING: Counter-clockwise polygon {} has no container", i);
             }
         }
     }
+    let hole_containment_elapsed = hole_containment_start.elapsed();
+    eprintln!("[geo-marching-squares]   ⏱️  Hole Containment: {:?} ({} bbox checks, {} point-in-poly checks)",
+        hole_containment_elapsed, bbox_checks, pip_checks);
 
     // Step 3: For each clockwise polygon, find if it's nested inside a hole
+    let island_containment_start = std::time::Instant::now();
     let mut cw_containers: Vec<Option<usize>> = vec![None; metas.len()];
+    let mut island_bbox_checks = 0usize;
+    let mut island_pip_checks = 0usize;
 
     for i in 0..metas.len() {
         if metas[i].is_clockwise {
@@ -587,10 +601,12 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
                     continue;
                 }
 
+                island_bbox_checks += 1;
                 if !metas[i].bbox.is_inside(&metas[j].bbox) {
                     continue;
                 }
 
+                island_pip_checks += 1;
                 if metas[i].ring.len() > 0 && polygon_contains_point(&metas[j].ring, &metas[i].ring[0]) {
                     cw_containers[i] = Some(j);
                     break; // Found container
@@ -598,8 +614,12 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
             }
         }
     }
+    let island_containment_elapsed = island_containment_start.elapsed();
+    eprintln!("[geo-marching-squares]   ⏱️  Island Containment: {:?} ({} bbox checks, {} point-in-poly checks)",
+        island_containment_elapsed, island_bbox_checks, island_pip_checks);
 
     // Step 4: Build final polygon structure
+    let assembly_start = std::time::Instant::now();
     // Root-level clockwise polygons (not inside any hole) become top-level multipolygon entries
     let mut result: Vec<Vec<Vec<Position>>> = Vec::new();
 
@@ -645,6 +665,12 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
             result.push(vec![metas[i].ring.clone()]);
         }
     }
+    let assembly_elapsed = assembly_start.elapsed();
+    let hierarchy_total = hierarchy_start.elapsed();
+
+    eprintln!("[geo-marching-squares]   ⏱️  Polygon Assembly: {:?} ({} output polygons)",
+        assembly_elapsed, result.len());
+    eprintln!("[geo-marching-squares]   ⏱️  TOTAL HIERARCHY: {:?}", hierarchy_total);
 
     result
 }
