@@ -636,6 +636,16 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
         }
     }
 
+    // Handle orphan counter-clockwise polygons (holes with no container)
+    // These can occur at grid boundaries or in test cases with small grids
+    // Treat them as standalone polygons (they'll appear as "inverted" shapes)
+    for i in 0..metas.len() {
+        if !metas[i].is_clockwise && hole_containers[i].is_none() {
+            // Lone CCW polygon - add as standalone
+            result.push(vec![metas[i].ring.clone()]);
+        }
+    }
+
     result
 }
 
