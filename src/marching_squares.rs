@@ -942,7 +942,7 @@ pub fn do_concurrent_from_cells(
     data: &[Vec<crate::GridCell>],
     isobands: &[f64],
 ) -> geojson::FeatureCollection {
-    use rayon::prelude::*;
+    // Note: rayon removed for sequential processing test
 
     eprintln!("[geo-marching-squares] do_concurrent_from_cells: Starting with {} thresholds, {} bands to generate",
         isobands.len(), isobands.len().saturating_sub(1));
@@ -951,13 +951,13 @@ pub fn do_concurrent_from_cells(
         if data.is_empty() { 0 } else { data[0].len() },
         data.len() * if data.is_empty() { 0 } else { data[0].len() });
 
-    // Process each isoband pair in parallel
+    // Process each isoband pair sequentially (testing performance)
     let features: Vec<Feature> = (0..isobands.len() - 1)
-        .into_par_iter()
+        .into_iter()  // Changed from into_par_iter() for sequential processing
         .map(|i| {
             eprintln!("[geo-marching-squares] Band {}/{}: Processing [{}, {})",
                 i + 1, isobands.len() - 1, isobands[i], isobands[i + 1]);
-            // Each thread processes one isoband level
+            // Each iteration processes one isoband level
             let result = process_band_from_cells(data, isobands[i], isobands[i + 1]);
             eprintln!("[geo-marching-squares] Band {}/{}: Completed", i + 1, isobands.len() - 1);
             result
