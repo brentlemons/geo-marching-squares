@@ -8,7 +8,6 @@ use crate::edge::{Edge, Move};
 use crate::isoline_assembler::IsolineAssembler;
 use crate::shape::Shape;
 use geojson::{Feature, Geometry, JsonObject, Position, Value as GeoValue};
-use rstar::{RTree, AABB};
 use std::collections::VecDeque;
 
 /// Round a coordinate value to 5 decimal places (approximately 1 meter accuracy)
@@ -25,25 +24,6 @@ struct BBox {
     max_x: f64,
     min_y: f64,
     max_y: f64,
-}
-
-/// Spatial index entry for R-tree queries
-/// Associates a polygon index with its bounding box for efficient spatial lookups
-#[derive(Debug, Clone)]
-struct SpatialEntry {
-    index: usize,
-    bbox: BBox,
-}
-
-impl rstar::RTreeObject for SpatialEntry {
-    type Envelope = AABB<[f64; 2]>;
-
-    fn envelope(&self) -> Self::Envelope {
-        AABB::from_corners(
-            [self.bbox.min_x, self.bbox.min_y],
-            [self.bbox.max_x, self.bbox.max_y],
-        )
-    }
 }
 
 impl BBox {
@@ -561,47 +541,24 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
     eprintln!("[geo-marching-squares]   ⏱️  Metadata (bbox+winding): {:?} for {} polygons ({} CW, {} CCW)",
         metadata_elapsed, metas.len(), cw_count, ccw_count);
 
-    // Step 2: Build R-tree spatial index of all clockwise polygons for efficient containment queries
-    let rtree_start = std::time::Instant::now();
-    let cw_entries: Vec<SpatialEntry> = metas
-        .iter()
-        .enumerate()
-        .filter(|(_, meta)| meta.is_clockwise)
-        .map(|(index, meta)| SpatialEntry {
-            index,
-            bbox: meta.bbox.clone(),
-        })
-        .collect();
-    let rtree: RTree<SpatialEntry> = RTree::bulk_load(cw_entries);
-    let rtree_elapsed = rtree_start.elapsed();
-    eprintln!("[geo-marching-squares]   ⏱️  R-tree Build: {:?} ({} CW polygons indexed)",
-        rtree_elapsed, rtree.size());
-
-    // Step 3: Find container for each counter-clockwise polygon (holes) using spatial index
+    // Step 2: Find container for each counter-clockwise polygon (holes)
     let hole_containment_start = std::time::Instant::now();
     let mut hole_containers: Vec<Option<usize>> = vec![None; metas.len()];
-    let mut rtree_queries = 0usize;
-    let mut rtree_candidates = 0usize;
+    let mut bbox_checks = 0usize;
     let mut pip_checks = 0usize;
 
     for i in 0..metas.len() {
         if !metas[i].is_clockwise {
-            rtree_queries += 1;
-            // This is a hole - query R-tree for potential CW containers
-            let hole_bbox = &metas[i].bbox;
-            let query_envelope = AABB::from_corners(
-                [hole_bbox.min_x, hole_bbox.min_y],
-                [hole_bbox.max_x, hole_bbox.max_y],
-            );
-
+            // This is a hole - find its clockwise container (early exit on first match)
             let mut container: Option<usize> = None;
 
-            // Query R-tree for polygons that could contain this hole
-            for entry in rtree.locate_in_envelope(&query_envelope) {
-                rtree_candidates += 1;
-                let j = entry.index;
+            for j in 0..metas.len() {
+                if i == j || !metas[j].is_clockwise {
+                    continue; // Skip self and other holes
+                }
 
-                // Verify bbox containment (R-tree gives us overlaps, need full containment)
+                bbox_checks += 1;
+                // Quick bbox check first
                 if !metas[i].bbox.is_inside(&metas[j].bbox) {
                     continue;
                 }
@@ -609,7 +566,7 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
                 pip_checks += 1;
                 // Point-in-polygon check - test first point of hole against container
                 if metas[i].ring.len() > 0 && polygon_contains_point(&metas[j].ring, &metas[i].ring[0]) {
-                    // Found a container! Early exit
+                    // Found a container! Early exit instead of finding smallest
                     container = Some(j);
                     break;
                 }
@@ -622,48 +579,24 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
         }
     }
     let hole_containment_elapsed = hole_containment_start.elapsed();
-    eprintln!("[geo-marching-squares]   ⏱️  Hole Containment: {:?} ({} R-tree queries, {} candidates checked, {} point-in-poly checks)",
-        hole_containment_elapsed, rtree_queries, rtree_candidates, pip_checks);
+    eprintln!("[geo-marching-squares]   ⏱️  Hole Containment: {:?} ({} bbox checks, {} point-in-poly checks)",
+        hole_containment_elapsed, bbox_checks, pip_checks);
 
-    // Step 4: Build R-tree spatial index of all counter-clockwise polygons (holes) for island detection
-    let ccw_rtree_start = std::time::Instant::now();
-    let ccw_entries: Vec<SpatialEntry> = metas
-        .iter()
-        .enumerate()
-        .filter(|(_, meta)| !meta.is_clockwise)
-        .map(|(index, meta)| SpatialEntry {
-            index,
-            bbox: meta.bbox.clone(),
-        })
-        .collect();
-    let ccw_rtree: RTree<SpatialEntry> = RTree::bulk_load(ccw_entries);
-    let ccw_rtree_elapsed = ccw_rtree_start.elapsed();
-    eprintln!("[geo-marching-squares]   ⏱️  CCW R-tree Build: {:?} ({} CCW polygons indexed)",
-        ccw_rtree_elapsed, ccw_rtree.size());
-
-    // Step 5: Find if each clockwise polygon is nested inside a hole using spatial index
+    // Step 3: For each clockwise polygon, find if it's nested inside a hole
     let island_containment_start = std::time::Instant::now();
     let mut cw_containers: Vec<Option<usize>> = vec![None; metas.len()];
-    let mut island_queries = 0usize;
-    let mut island_candidates = 0usize;
+    let mut island_bbox_checks = 0usize;
     let mut island_pip_checks = 0usize;
 
     for i in 0..metas.len() {
         if metas[i].is_clockwise {
-            island_queries += 1;
-            // Check if this CW polygon is inside a CCW polygon (island in hole)
-            let cw_bbox = &metas[i].bbox;
-            let query_envelope = AABB::from_corners(
-                [cw_bbox.min_x, cw_bbox.min_y],
-                [cw_bbox.max_x, cw_bbox.max_y],
-            );
+            // Check if this clockwise polygon is inside a counter-clockwise polygon (island in hole)
+            for j in 0..metas.len() {
+                if i == j || metas[j].is_clockwise {
+                    continue;
+                }
 
-            // Query CCW R-tree for potential hole containers
-            for entry in ccw_rtree.locate_in_envelope(&query_envelope) {
-                island_candidates += 1;
-                let j = entry.index;
-
-                // Verify bbox containment
+                island_bbox_checks += 1;
                 if !metas[i].bbox.is_inside(&metas[j].bbox) {
                     continue;
                 }
@@ -677,8 +610,8 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
         }
     }
     let island_containment_elapsed = island_containment_start.elapsed();
-    eprintln!("[geo-marching-squares]   ⏱️  Island Containment: {:?} ({} R-tree queries, {} candidates checked, {} point-in-poly checks)",
-        island_containment_elapsed, island_queries, island_candidates, island_pip_checks);
+    eprintln!("[geo-marching-squares]   ⏱️  Island Containment: {:?} ({} bbox checks, {} point-in-poly checks)",
+        island_containment_elapsed, island_bbox_checks, island_pip_checks);
 
     // Step 4: Build final polygon structure
     let assembly_start = std::time::Instant::now();

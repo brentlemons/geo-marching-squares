@@ -292,3 +292,150 @@ Result: -232 lines, zero warnings, cleaner codebase
 ### The Lesson
 
 Sometimes the "middle-out" solution isn't about changing the algorithm structure, but about finding the right classification metric. Winding direction was there all along - we just needed to test it experimentally to discover its power.
+
+---
+
+# R-tree Spatial Indexing Attempt (Commit a3f46e4 - REVERTED)
+
+## Motivation (2025-10-08)
+
+After achieving 68% speedup with winding-based hierarchy, profiling showed remaining bottleneck:
+- Hole Containment: 249ms for 1,682 point-in-poly checks
+- Point-in-polygon tests are ~1000x slower than bbox checks (~148μs vs ~90ns)
+- Early exit optimization (98bc26a) reduced bbox checks by 91% but didn't improve wall time
+- Attempted R-tree spatial indexing to reduce candidates checked
+
+## Implementation (Commit a3f46e4)
+
+Added `rstar` crate for spatial indexing:
+
+```rust
+// Build R-tree indexes
+let cw_rtree: RTree<SpatialEntry> = RTree::bulk_load(cw_polygons);
+let ccw_rtree: RTree<SpatialEntry> = RTree::bulk_load(ccw_polygons);
+
+// Query for candidates
+for hole in ccw_polygons {
+    let query_envelope = AABB::from_corners(
+        [hole.bbox.min_x, hole.bbox.min_y],
+        [hole.bbox.max_x, hole.bbox.max_y],
+    );
+
+    for candidate in rtree.locate_in_envelope(&query_envelope) {
+        // Check bbox containment + point-in-polygon
+    }
+}
+```
+
+## Results - FAILED ❌
+
+**Log stream**: `api/grib-inspector-api/368568d03cfe46f3a81d740a2013b978`
+
+### Critical Failure: Zero Point-in-Polygon Tests
+
+```
+Metadata (bbox+winding): 1.358ms for 2502 polygons (1020 CW, 1482 CCW)
+R-tree Build: 402μs (1020 CW polygons indexed)
+Hole Containment: 2.634ms (1482 R-tree queries, 116 candidates checked, 0 point-in-poly checks)
+CCW R-tree Build: 356μs (1482 CCW polygons indexed)
+Island Containment: 201μs (1020 R-tree queries, 1640 candidates checked, 0 point-in-poly checks)
+```
+
+**The Bug**:
+- 1,482 holes queried R-tree → 116 candidates returned
+- **0 point-in-polygon tests performed** (should be ~1,682 based on previous runs)
+- Result: No holes matched to containers (hundreds of "no container" warnings)
+- GeoJSON output had no nested polygons (holes rendered as separate polygons)
+
+### Root Cause Analysis
+
+**Problem**: `locate_in_envelope()` returns polygons whose bboxes **overlap** the query envelope, not polygons that **contain** it.
+
+```rust
+// Query with hole's bbox
+let query_envelope = AABB::from_corners(hole.bbox.min, hole.bbox.max);
+
+// R-tree returns CW polygons that OVERLAP hole's bbox
+for candidate in rtree.locate_in_envelope(&query_envelope) {
+    // But we check: does hole.bbox fit INSIDE candidate.bbox?
+    if !hole.bbox.is_inside(&candidate.bbox) {
+        continue;  // ← ALL candidates fail this check!
+    }
+}
+```
+
+**Why it fails**:
+- Query envelope = hole's exact bbox
+- R-tree returns: CW polygons whose bboxes overlap/intersect
+- Overlap ≠ Containment
+- Bbox containment check fails for all candidates
+- No point-in-polygon tests ever run
+- No holes matched
+
+**What we needed**:
+- Query method that finds "bboxes that contain this bbox"
+- OR query with a point instead of envelope
+- OR different R-tree query strategy
+
+### Performance Comparison
+
+| Metric | Early Exit (98bc26a) | R-tree (a3f46e4) |
+|--------|---------------------|------------------|
+| Hole Containment | 249ms | 2.6ms ⚠️ |
+| Bbox checks | 235K | 116 candidates |
+| Point-in-poly checks | 1,682 | **0** ❌ |
+| Holes matched | Correct | **ZERO** ❌ |
+| GeoJSON output | Valid | **Broken** ❌ |
+
+**Conclusion**: R-tree was faster but **completely broken** - matched zero holes due to query semantics mismatch.
+
+## Why Previous Spatial Index Attempt Failed (Historical)
+
+User reported: "we tried spatial indexing before and it was 2.7x slower"
+
+Likely reasons:
+1. R-tree construction overhead for small polygon counts
+2. Query overhead exceeding linear scan for certain distributions
+3. Similar containment query issues
+4. Poor cache locality vs sequential iteration
+
+## Decision: Revert to 98bc26a
+
+**Reverted** R-tree implementation (commit a3f46e4) back to early exit optimization (98bc26a):
+- Keeps working hole/island detection
+- Maintains ~12.5s total performance (68% improvement over baseline)
+- Simple O(N²) with early exit is correct and fast enough
+- Point-in-polygon tests still expensive but unavoidable
+
+**Files kept**: `RECURSIVE_WALKING_ALGORITHM.md` - comprehensive walking algorithm documentation
+
+## Future Optimization Ideas (If Needed)
+
+1. **Faster point-in-polygon algorithm**:
+   - Current: Ray casting (~148μs per test)
+   - Consider: Winding number algorithm
+   - Or: Pre-compute additional spatial hints
+
+2. **Better R-tree query**:
+   - Use point containment query instead of envelope query
+   - Query with hole's first coordinate, find all CW bboxes containing it
+   - Would need custom R-tree query predicate
+
+3. **Accept current performance**:
+   - 12.5s for 16 bands processing 4,556 polygons
+   - 68% faster than baseline (39.5s)
+   - Good enough for meteorological contour generation
+
+4. **Optimize point-in-polygon itself**:
+   - Most expensive operation at ~148μs per test
+   - 1,682 tests × 148μs = ~249ms (matches profiling!)
+   - 1000x slower than bbox checks
+   - Direct optimization target
+
+## Key Takeaway
+
+**Spatial indexing can be fast but wrong**. In this case:
+- R-tree reduced candidates from 235K to 116 (99.95% reduction!)
+- But query semantics mismatch caused zero matches
+- Fast broken code is worse than slow correct code
+- Simple early exit O(N²) is good enough and correct
