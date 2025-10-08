@@ -351,207 +351,13 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
     feature
 }
 
-/// Determine which cell to step into from the polygon boundary
-/// Based on the last edge's move direction, step perpendicular inward
-fn step_into_polygon(last_move: &Move, current_r: usize, current_c: usize, rows: usize, cols: usize) -> Option<(usize, usize)> {
-    match last_move {
-        Move::Right => {
-            // Moving right, interior is below (down)
-            if current_r + 1 < rows { Some((current_r + 1, current_c)) } else { None }
-        }
-        Move::Down => {
-            // Moving down, interior is to the left
-            if current_c > 0 { Some((current_r, current_c - 1)) } else { None }
-        }
-        Move::Left => {
-            // Moving left, interior is above (up)
-            if current_r > 0 { Some((current_r - 1, current_c)) } else { None }
-        }
-        Move::Up => {
-            // Moving up, interior is to the right
-            if current_c + 1 < cols { Some((current_r, current_c + 1)) } else { None }
-        }
-        Move::Unknown => None,
-    }
-}
-
-/// Flood fill to find all cells inside a closed polygon boundary
-/// Uses BFS starting from an interior cell with polygon containment check
-fn flood_fill_interior(
-    cells: &[Vec<Option<Shape>>],
-    start: Option<(usize, usize)>,
-    boundary_cells: &std::collections::HashSet<(usize, usize)>,
-    polygon_ring: &[Position],
-) -> std::collections::HashSet<(usize, usize)> {
-    use std::collections::{HashSet, VecDeque};
-
-    let mut interior = HashSet::new();
-    let mut queue = VecDeque::new();
-
-    if let Some(start_pos) = start {
-        queue.push_back(start_pos);
-        interior.insert(start_pos);
-    }
-
-    let rows = cells.len();
-    let cols = if rows > 0 { cells[0].len() } else { 0 };
-
-    while let Some((r, c)) = queue.pop_front() {
-        // Add neighbors to queue (4-connected)
-        let neighbors = [
-            (r.wrapping_sub(1), c), // up
-            (r + 1, c),              // down
-            (r, c.wrapping_sub(1)),  // left
-            (r, c + 1),              // right
-        ];
-
-        for (nr, nc) in neighbors {
-            // Bounds check
-            if nr >= rows || nc >= cols {
-                continue;
-            }
-
-            // Already visited or on boundary
-            if interior.contains(&(nr, nc)) || boundary_cells.contains(&(nr, nc)) {
-                continue;
-            }
-
-            // Check if cell center is actually inside the polygon
-            // Cell center is at (r + 0.5, c + 0.5)
-            let cell_center = [nr as f64 + 0.5, nc as f64 + 0.5];
-            if !point_in_ring(&cell_center, polygon_ring) {
-                continue;
-            }
-
-            interior.insert((nr, nc));
-            queue.push_back((nr, nc));
-        }
-    }
-
-    interior
-}
-
-/// Check if a point is inside a polygon ring using ray casting
-fn point_in_ring(point: &[f64], ring: &[Position]) -> bool {
-    let mut inside = false;
-    let mut j = ring.len() - 1;
-
-    for i in 0..ring.len() {
-        let one = &ring[i];
-        let two = &ring[j];
-
-        if ((one[1] > point[1]) != (two[1] > point[1]))
-            && (point[0] < (two[0] - one[0]) * (point[1] - one[1]) / (two[1] - one[1]) + one[0])
-        {
-            inside = !inside;
-        }
-
-        j = i;
-    }
-
-    inside
-}
-
-/// Polygon orientation classification based on side-detection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PolygonOrientation {
-    Exterior,  // Inside band is outside the polygon (typical exterior ring)
-    Hole,      // Inside band is inside the polygon (typical hole)
-    Uncertain, // Cannot determine from side-detection alone
-}
-
-/// Check if a grid cell value is "inside band" (between lower and upper thresholds)
-fn is_inside_band(value: f64, lower: f64, upper: f64) -> bool {
-    value >= lower && value < upper
-}
-
-/// Perform side-detection for a single edge during polygon walking
-/// Returns (high_side_score, low_side_score) based on which side has "inside band" values
-///
-/// Logic per edge direction:
-/// - Right edge: high side is below (r+1), low side is above (r)
-/// - Down edge: high side is left (c-1), low side is right (c)
-/// - Left edge: high side is above (r), low side is below (r+1)
-/// - Up edge: high side is right (c), low side is left (c-1)
-fn detect_edge_side(
-    grid_data: &[Vec<crate::GridCell>],
-    lower: f64,
-    upper: f64,
-    cell_r: usize,
-    cell_c: usize,
-    move_dir: &Move,
-) -> (i32, i32) {
-    let grid_rows = grid_data.len();
-    let grid_cols = if grid_rows > 0 { grid_data[0].len() } else { 0 };
-
-    match move_dir {
-        Move::Right => {
-            // Moving right: check cell below (high side) and current cell row (low side)
-            let high = if cell_r + 2 < grid_rows && cell_c + 1 < grid_cols {
-                is_inside_band(grid_data[cell_r + 2][cell_c + 1].value, lower, upper)
-            } else {
-                false
-            };
-            let low = if cell_c + 1 < grid_cols {
-                is_inside_band(grid_data[cell_r][cell_c + 1].value, lower, upper)
-            } else {
-                false
-            };
-            (if high { 1 } else { 0 }, if low { 1 } else { 0 })
-        }
-        Move::Down => {
-            // Moving down: check cell to left (high side) and current cell column (low side)
-            let high = if cell_r + 1 < grid_rows && cell_c > 0 {
-                is_inside_band(grid_data[cell_r + 1][cell_c].value, lower, upper)
-            } else {
-                false
-            };
-            let low = if cell_r + 1 < grid_rows && cell_c + 1 < grid_cols {
-                is_inside_band(grid_data[cell_r + 1][cell_c + 1].value, lower, upper)
-            } else {
-                false
-            };
-            (if high { 1 } else { 0 }, if low { 1 } else { 0 })
-        }
-        Move::Left => {
-            // Moving left: check cell above (high side) and current cell row (low side)
-            let high = if cell_r > 0 {
-                is_inside_band(grid_data[cell_r][cell_c].value, lower, upper)
-            } else {
-                false
-            };
-            let low = if cell_r + 2 < grid_rows {
-                is_inside_band(grid_data[cell_r + 2][cell_c].value, lower, upper)
-            } else {
-                false
-            };
-            (if high { 1 } else { 0 }, if low { 1 } else { 0 })
-        }
-        Move::Up => {
-            // Moving up: check cell to right (high side) and current cell column (low side)
-            let high = if cell_r > 0 && cell_c + 1 < grid_cols {
-                is_inside_band(grid_data[cell_r][cell_c + 1].value, lower, upper)
-            } else {
-                false
-            };
-            let low = if cell_r > 0 && cell_c > 0 {
-                is_inside_band(grid_data[cell_r][cell_c].value, lower, upper)
-            } else {
-                false
-            };
-            (if high { 1 } else { 0 }, if low { 1 } else { 0 })
-        }
-        Move::Unknown => (0, 0),
-    }
-}
-
-/// Recursively walk a polygon and detect its orientation using side-detection
-/// Returns a polygon structure: [exterior_ring, hole1, hole2, ...]
+/// Walk a polygon starting from a cell and return its exterior ring
+/// Containment hierarchy will be determined in post-processing based on winding direction
 fn walk_polygon_recursive(
     cells: &mut Vec<Vec<Option<Shape>>>,
-    grid_data: &[Vec<crate::GridCell>],
-    lower: f64,
-    upper: f64,
+    _grid_data: &[Vec<crate::GridCell>],
+    _lower: f64,
+    _upper: f64,
     start_r: usize,
     start_c: usize,
     processed: &mut std::collections::HashSet<(usize, usize)>,
@@ -568,11 +374,6 @@ fn walk_polygon_recursive(
     let mut x = start_c;
     let mut go_on = true;
     let mut current_edge: Option<Edge> = None;
-    let mut last_move = Move::Unknown;
-
-    // Side-detection: track which side of edges has "inside band" values
-    let mut high_side_count = 0i32;  // Inside band on "high" side (right/below)
-    let mut low_side_count = 0i32;   // Inside band on "low" side (left/above)
 
     // Walk edges to close the loop
     while go_on {
@@ -601,13 +402,6 @@ fn walk_polygon_recursive(
 
         for edge in tmp_edges {
             cell_ref.remove_edge(edge.start());
-            last_move = *edge.move_direction();
-
-            // Side-detection: accumulate scores for each edge (before edge is moved)
-            let (high, low) = detect_edge_side(grid_data, lower, upper, y, x, edge.move_direction());
-            high_side_count += high;
-            low_side_count += low;
-
             current_edge = Some(edge.clone());
             edges.push(edge);
 
@@ -687,23 +481,8 @@ fn walk_polygon_recursive(
         "unknown"
     };
 
-    // Classify polygon orientation using side-detection
-    let orientation = if high_side_count > low_side_count * 3 / 2 {
-        PolygonOrientation::Exterior
-    } else if low_side_count > high_side_count * 3 / 2 {
-        PolygonOrientation::Hole
-    } else {
-        PolygonOrientation::Uncertain
-    };
-
-    let orientation_str = match orientation {
-        PolygonOrientation::Exterior => "EXTERIOR",
-        PolygonOrientation::Hole => "HOLE",
-        PolygonOrientation::Uncertain => "UNCERTAIN",
-    };
-
-    eprintln!("[geo-marching-squares] Polygon at ({}, {}) winding: {}, orientation: {} (high={}, low={}, edges={})",
-        start_r, start_c, winding, orientation_str, high_side_count, low_side_count, exterior_ring.len());
+    eprintln!("[geo-marching-squares] Polygon at ({}, {}) winding: {}, edges: {}",
+        start_r, start_c, winding, exterior_ring.len());
 
     // Return just the exterior ring - containment will be determined in post-processing
     // No more flood fill or recursive hole processing
@@ -716,7 +495,6 @@ struct PolygonMeta {
     ring: Vec<Position>,
     bbox: BBox,
     is_clockwise: bool,
-    index: usize,
 }
 
 /// Build polygon hierarchy using winding direction and bbox-optimized containment detection
@@ -736,10 +514,10 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
     }
 
     // Step 1: Build metadata for all polygons (just exterior rings)
-    let mut metas: Vec<PolygonMeta> = raw_polygons
+    let metas: Vec<PolygonMeta> = raw_polygons
         .into_iter()
         .enumerate()
-        .filter_map(|(idx, mut poly)| {
+        .filter_map(|(_idx, mut poly)| {
             if poly.is_empty() || poly[0].is_empty() {
                 return None;
             }
@@ -750,7 +528,6 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
                 ring,
                 bbox,
                 is_clockwise,
-                index: idx,
             })
         })
         .collect();
