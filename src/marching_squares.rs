@@ -549,9 +549,8 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
 
     for i in 0..metas.len() {
         if !metas[i].is_clockwise {
-            // This is a hole - find its clockwise container
-            let mut best_container: Option<usize> = None;
-            let mut best_area = f64::INFINITY;
+            // This is a hole - find its clockwise container (early exit on first match)
+            let mut container: Option<usize> = None;
 
             for j in 0..metas.len() {
                 if i == j || !metas[j].is_clockwise {
@@ -567,18 +566,14 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
                 pip_checks += 1;
                 // Point-in-polygon check - test first point of hole against container
                 if metas[i].ring.len() > 0 && polygon_contains_point(&metas[j].ring, &metas[i].ring[0]) {
-                    // This clockwise polygon contains the hole
-                    // Choose smallest container (most specific)
-                    let area = (metas[j].bbox.max_x - metas[j].bbox.min_x) * (metas[j].bbox.max_y - metas[j].bbox.min_y);
-                    if area < best_area {
-                        best_area = area;
-                        best_container = Some(j);
-                    }
+                    // Found a container! Early exit instead of finding smallest
+                    container = Some(j);
+                    break;
                 }
             }
 
-            hole_containers[i] = best_container;
-            if best_container.is_none() {
+            hole_containers[i] = container;
+            if container.is_none() {
                 eprintln!("[geo-marching-squares]   WARNING: Counter-clockwise polygon {} has no container", i);
             }
         }
