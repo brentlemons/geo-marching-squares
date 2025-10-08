@@ -705,54 +705,212 @@ fn walk_polygon_recursive(
     eprintln!("[geo-marching-squares] Polygon at ({}, {}) winding: {}, orientation: {} (high={}, low={}, edges={})",
         start_r, start_c, winding, orientation_str, high_side_count, low_side_count, exterior_ring.len());
 
-    // EXPERIMENTAL: Only process counter-clockwise polygons
-    if winding == "clockwise" {
-        eprintln!("[geo-marching-squares] SKIPPING clockwise polygon at ({}, {})", start_r, start_c);
+    // Return just the exterior ring - containment will be determined in post-processing
+    // No more flood fill or recursive hole processing
+    vec![exterior_ring]
+}
+
+/// Metadata for a polygon during hierarchy building
+#[derive(Debug, Clone)]
+struct PolygonMeta {
+    ring: Vec<Position>,
+    bbox: BBox,
+    is_clockwise: bool,
+    index: usize,
+}
+
+/// Build polygon hierarchy using winding direction and bbox-optimized containment detection
+///
+/// Takes a flat list of polygon rings and organizes them into proper GeoJSON MultiPolygon structure:
+/// - Clockwise rings (exterior/islands) become separate polygons or nested within holes
+/// - Counter-clockwise rings (holes) become holes in their containing clockwise polygon
+///
+/// Algorithm:
+/// 1. Compute bbox and winding for each polygon
+/// 2. For each counter-clockwise polygon (hole), find its clockwise container
+/// 3. For each clockwise polygon at root level, attach its holes
+/// 4. Nested clockwise polygons (islands in holes) become separate polygons
+fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec<Position>>> {
+    if raw_polygons.is_empty() {
         return vec![];
     }
 
-    // Step into polygon to find interior starting cell
-    let interior_start = step_into_polygon(&last_move, y, x, rows, cols);
+    // Step 1: Build metadata for all polygons (just exterior rings)
+    let mut metas: Vec<PolygonMeta> = raw_polygons
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, mut poly)| {
+            if poly.is_empty() || poly[0].is_empty() {
+                return None;
+            }
+            let ring = poly.remove(0); // Take just the exterior ring
+            let bbox = BBox::from_ring(&ring);
+            let is_clockwise = compute_winding(&ring) == "clockwise";
+            Some(PolygonMeta {
+                ring,
+                bbox,
+                is_clockwise,
+                index: idx,
+            })
+        })
+        .collect();
 
-    // Flood fill to find all interior cells (with polygon containment check)
-    let interior_cells = flood_fill_interior(cells, interior_start, &boundary_cells, &exterior_ring);
+    eprintln!("[geo-marching-squares] Building hierarchy for {} polygons ({} CW, {} CCW)",
+        metas.len(),
+        metas.iter().filter(|m| m.is_clockwise).count(),
+        metas.iter().filter(|m| !m.is_clockwise).count()
+    );
 
-    // Debug: log interior cells found
-    if !interior_cells.is_empty() {
-        eprintln!("[geo-marching-squares] Found {} interior cells for polygon at ({}, {})",
-            interior_cells.len(), start_r, start_c);
+    // Step 2: Find container for each counter-clockwise polygon (holes)
+    let mut hole_containers: Vec<Option<usize>> = vec![None; metas.len()];
+
+    for i in 0..metas.len() {
+        if !metas[i].is_clockwise {
+            // This is a hole - find its clockwise container
+            let mut best_container: Option<usize> = None;
+            let mut best_area = f64::INFINITY;
+
+            for j in 0..metas.len() {
+                if i == j || !metas[j].is_clockwise {
+                    continue; // Skip self and other holes
+                }
+
+                // Quick bbox check first
+                if !metas[i].bbox.is_inside(&metas[j].bbox) {
+                    continue;
+                }
+
+                // Point-in-polygon check - test first point of hole against container
+                if metas[i].ring.len() > 0 && polygon_contains_point(&metas[j].ring, &metas[i].ring[0]) {
+                    // This clockwise polygon contains the hole
+                    // Choose smallest container (most specific)
+                    let area = (metas[j].bbox.max_x - metas[j].bbox.min_x) * (metas[j].bbox.max_y - metas[j].bbox.min_y);
+                    if area < best_area {
+                        best_area = area;
+                        best_container = Some(j);
+                    }
+                }
+            }
+
+            hole_containers[i] = best_container;
+            if best_container.is_none() {
+                eprintln!("[geo-marching-squares] WARNING: Counter-clockwise polygon {} has no container", i);
+            }
+        }
     }
 
-    // Recursively process any holes (unprocessed cells with shapes inside)
-    let mut holes = Vec::new();
-    let mut holes_found = 0;
-    for (r, c) in interior_cells {
-        if !processed.contains(&(r, c)) {
-            if let Some(cell) = &cells[r][c] {
-                if !cell.is_cleared() {
-                    // Found a hole! Recursively walk it
-                    holes_found += 1;
-                    eprintln!("[geo-marching-squares] Processing hole {} at ({}, {}) inside polygon ({}, {})",
-                        holes_found, r, c, start_r, start_c);
-                    let hole_polygon = walk_polygon_recursive(cells, grid_data, lower, upper, r, c, processed);
-                    // Take only the exterior ring of the hole (index 0)
-                    if !hole_polygon.is_empty() {
-                        holes.push(hole_polygon[0].clone());
-                    }
+    // Step 3: For each clockwise polygon, find if it's nested inside a hole
+    let mut cw_containers: Vec<Option<usize>> = vec![None; metas.len()];
+
+    for i in 0..metas.len() {
+        if metas[i].is_clockwise {
+            // Check if this clockwise polygon is inside a counter-clockwise polygon (island in hole)
+            for j in 0..metas.len() {
+                if i == j || metas[j].is_clockwise {
+                    continue;
+                }
+
+                if !metas[i].bbox.is_inside(&metas[j].bbox) {
+                    continue;
+                }
+
+                if metas[i].ring.len() > 0 && polygon_contains_point(&metas[j].ring, &metas[i].ring[0]) {
+                    cw_containers[i] = Some(j);
+                    break; // Found container
                 }
             }
         }
     }
 
-    if holes_found > 0 {
-        eprintln!("[geo-marching-squares] Polygon at ({}, {}) has {} holes",
-            start_r, start_c, holes.len());
+    // Step 4: Build final polygon structure
+    // Root-level clockwise polygons (not inside any hole) become top-level multipolygon entries
+    let mut result: Vec<Vec<Vec<Position>>> = Vec::new();
+
+    for i in 0..metas.len() {
+        if metas[i].is_clockwise && cw_containers[i].is_none() {
+            // This is a root-level clockwise polygon
+            let mut polygon = vec![metas[i].ring.clone()];
+
+            // Attach its holes (counter-clockwise polygons that have this as container)
+            for j in 0..metas.len() {
+                if !metas[j].is_clockwise && hole_containers[j] == Some(i) {
+                    polygon.push(metas[j].ring.clone());
+                }
+            }
+
+            result.push(polygon);
+        }
     }
 
-    // Build polygon: [exterior, hole1, hole2, ...]
-    let mut polygon = vec![exterior_ring];
-    polygon.extend(holes);
-    polygon
+    // Also add islands (clockwise polygons inside holes) as separate polygons
+    for i in 0..metas.len() {
+        if metas[i].is_clockwise && cw_containers[i].is_some() {
+            // This is an island - add as separate polygon with its own holes
+            let mut polygon = vec![metas[i].ring.clone()];
+
+            // Find holes inside this island
+            for j in 0..metas.len() {
+                if !metas[j].is_clockwise && hole_containers[j] == Some(i) {
+                    polygon.push(metas[j].ring.clone());
+                }
+            }
+
+            result.push(polygon);
+        }
+    }
+
+    result
+}
+
+/// Compute winding direction for a ring (clockwise or counter-clockwise)
+fn compute_winding(ring: &[Position]) -> &'static str {
+    if ring.len() < 3 {
+        return "unknown";
+    }
+
+    // Shoelace formula (signed area)
+    let mut signed_area = 0.0;
+    let n = ring.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        signed_area += ring[i][0] * ring[j][1];
+        signed_area -= ring[j][0] * ring[i][1];
+    }
+
+    if signed_area > 0.0 {
+        "counter-clockwise"
+    } else {
+        "clockwise"
+    }
+}
+
+/// Check if a polygon contains a point using ray casting algorithm
+fn polygon_contains_point(ring: &[Position], point: &Position) -> bool {
+    if ring.len() < 3 {
+        return false;
+    }
+
+    let mut inside = false;
+    let px = point[0];
+    let py = point[1];
+
+    let n = ring.len();
+    let mut j = n - 1;
+
+    for i in 0..n {
+        let xi = ring[i][0];
+        let yi = ring[i][1];
+        let xj = ring[j][0];
+        let yj = ring[j][1];
+
+        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+            inside = !inside;
+        }
+
+        j = i;
+    }
+
+    inside
 }
 
 /// Process a single isoband level from GridCell data (memory-efficient)
@@ -848,15 +1006,22 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
     }
 
     let recursive_elapsed = recursive_start.elapsed();
-    eprintln!("[geo-marching-squares] ⏱️  Recursive Edge Walking + Hole Detection: {:?} ({} final polygons)",
+    eprintln!("[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} raw polygons)",
         recursive_elapsed, polygons.len());
 
+    // Build containment hierarchy using winding direction + bbox optimization
+    let nesting_start = std::time::Instant::now();
+    let hierarchical_polygons = build_polygon_hierarchy(polygons);
+    let nesting_elapsed = nesting_start.elapsed();
+    eprintln!("[geo-marching-squares] ⏱️  Polygon Nesting: {:?} ({} final polygons)",
+        nesting_elapsed, hierarchical_polygons.len());
+
     eprintln!("[geo-marching-squares] process_band_from_cells: Polygon processing complete, building feature with {} polygons",
-        polygons.len());
+        hierarchical_polygons.len());
 
     // Build MultiPolygon geometry
     let geometry_start = std::time::Instant::now();
-    let multi_polygon = GeoValue::MultiPolygon(polygons);
+    let multi_polygon = GeoValue::MultiPolygon(hierarchical_polygons);
 
     // Create Feature with properties
     let mut feature = Feature {
