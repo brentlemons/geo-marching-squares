@@ -7,10 +7,15 @@ use crate::cell::LineSegment;
 use crate::point::{Point, Side};
 use geojson::Position;
 
-/// Round a coordinate value to 5 decimal places
-fn round_coord(value: f64) -> f64 {
-    (value * 100000.0).round() / 100000.0
+/// Default coordinate precision
+const DEFAULT_PRECISION: u32 = 5;
+
+/// Round a coordinate value to specified decimal places
+fn round_coord_with_precision(value: f64, precision: u32) -> f64 {
+    let factor = 10_f64.powi(precision as i32);
+    (value * factor).round() / factor
 }
+
 
 /// Check if two points are equal within a small epsilon
 fn points_equal(p1: &Point, p2: &Point) -> bool {
@@ -41,6 +46,11 @@ impl IsolineAssembler {
 
     /// Assemble all segments into polylines
     pub fn assemble(&mut self) -> Vec<Vec<Position>> {
+        self.assemble_with_precision(DEFAULT_PRECISION)
+    }
+
+    /// Assemble all segments into polylines with configurable precision
+    pub fn assemble_with_precision(&mut self, precision: u32) -> Vec<Vec<Position>> {
         let mut polylines = Vec::new();
         let mut used = vec![false; self.segments.len()];
 
@@ -50,7 +60,7 @@ impl IsolineAssembler {
             }
 
             // Start a new polyline
-            let polyline = self.trace_polyline(start_idx, &mut used);
+            let polyline = self.trace_polyline_with_precision(start_idx, &mut used, precision);
             if !polyline.is_empty() {
                 polylines.push(polyline);
             }
@@ -59,8 +69,13 @@ impl IsolineAssembler {
         polylines
     }
 
-    /// Trace a single polyline starting from a segment
-    fn trace_polyline(&self, start_idx: usize, used: &mut [bool]) -> Vec<Position> {
+    /// Trace a single polyline with configurable precision
+    fn trace_polyline_with_precision(
+        &self,
+        start_idx: usize,
+        used: &mut [bool],
+        precision: u32,
+    ) -> Vec<Position> {
         let mut polyline = Vec::new();
         let mut current_idx = start_idx;
 
@@ -69,14 +84,14 @@ impl IsolineAssembler {
 
         // Add start point
         polyline.push(vec![
-            round_coord(segment.start.x().unwrap()),
-            round_coord(segment.start.y().unwrap()),
+            round_coord_with_precision(segment.start.x().unwrap(), precision),
+            round_coord_with_precision(segment.start.y().unwrap(), precision),
         ]);
 
         // Add end point
         polyline.push(vec![
-            round_coord(segment.end.x().unwrap()),
-            round_coord(segment.end.y().unwrap()),
+            round_coord_with_precision(segment.end.x().unwrap(), precision),
+            round_coord_with_precision(segment.end.y().unwrap(), precision),
         ]);
 
         // Try to extend polyline forward
@@ -93,8 +108,8 @@ impl IsolineAssembler {
                 let next_segment = &self.segments[next_idx].2;
 
                 polyline.push(vec![
-                    round_coord(next_segment.end.x().unwrap()),
-                    round_coord(next_segment.end.y().unwrap()),
+                    round_coord_with_precision(next_segment.end.x().unwrap(), precision),
+                    round_coord_with_precision(next_segment.end.y().unwrap(), precision),
                 ]);
 
                 // Check if loop closed
@@ -168,9 +183,13 @@ mod tests {
 
     #[test]
     fn test_round_coord() {
-        assert_eq!(round_coord(1.234567), 1.23457);
-        assert_eq!(round_coord(1.234564), 1.23456);
-        assert_eq!(round_coord(-122.123456789), -122.12346);
+        // Test with default precision (5 decimals)
+        assert_eq!(round_coord_with_precision(1.234567, 5), 1.23457);
+        assert_eq!(round_coord_with_precision(1.234564, 5), 1.23456);
+        assert_eq!(round_coord_with_precision(-122.123456789, 5), -122.12346);
+        // Test with lower precision
+        assert_eq!(round_coord_with_precision(1.234567, 3), 1.235);
+        assert_eq!(round_coord_with_precision(-122.123456, 2), -122.12);
     }
 
     #[test]

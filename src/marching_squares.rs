@@ -10,11 +10,28 @@ use crate::shape::Shape;
 use geojson::{Feature, Geometry, JsonObject, Position, Value as GeoValue};
 use std::collections::VecDeque;
 
+/// Default coordinate precision (5 decimal places, ~1.1m at equator)
+pub const DEFAULT_PRECISION: u32 = 5;
+
+/// Round a coordinate value to specified decimal places
+///
+/// # Arguments
+///
+/// * `value` - The coordinate value to round
+/// * `precision` - Number of decimal places (1-6 recommended)
+///   - 1 = ~11 km, 2 = ~1.1 km, 3 = ~110 m, 4 = ~11 m, 5 = ~1.1 m, 6 = ~0.11 m
+///
+/// Matches Java's BigDecimal.setScale(n, RoundingMode.HALF_UP)
+fn round_coord_with_precision(value: f64, precision: u32) -> f64 {
+    let factor = 10_f64.powi(precision as i32);
+    (value * factor).round() / factor
+}
+
 /// Round a coordinate value to 5 decimal places (approximately 1 meter accuracy)
 ///
 /// Matches Java's BigDecimal.setScale(5, RoundingMode.HALF_UP)
 fn round_coord(value: f64) -> f64 {
-    (value * 100000.0).round() / 100000.0
+    round_coord_with_precision(value, DEFAULT_PRECISION)
 }
 
 /// Bounding box for spatial optimization of polygon nesting
@@ -353,7 +370,7 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
 
 /// Walk a polygon starting from a cell and return its exterior ring
 /// Containment hierarchy will be determined in post-processing based on winding direction
-fn walk_polygon_recursive(
+fn walk_polygon_recursive_with_precision(
     cells: &mut Vec<Vec<Option<Shape>>>,
     _grid_data: &[Vec<crate::GridCell>],
     _lower: f64,
@@ -361,6 +378,7 @@ fn walk_polygon_recursive(
     start_r: usize,
     start_c: usize,
     processed: &mut std::collections::HashSet<(usize, usize)>,
+    precision: u32,
 ) -> Vec<Vec<Position>> {
     use std::collections::HashSet;
 
@@ -451,14 +469,14 @@ fn walk_polygon_recursive(
     let mut exterior_ring: Vec<Position> = Vec::new();
     if !edges.is_empty() {
         exterior_ring.push(vec![
-            round_coord(edges[0].start().x().unwrap()),
-            round_coord(edges[0].start().y().unwrap()),
+            round_coord_with_precision(edges[0].start().x().unwrap(), precision),
+            round_coord_with_precision(edges[0].start().y().unwrap(), precision),
         ]);
 
         for edge in &edges {
             exterior_ring.push(vec![
-                round_coord(edge.end().x().unwrap()),
-                round_coord(edge.end().y().unwrap()),
+                round_coord_with_precision(edge.end().x().unwrap(), precision),
+                round_coord_with_precision(edge.end().y().unwrap(), precision),
             ]);
         }
     }
@@ -748,6 +766,23 @@ fn polygon_contains_point(ring: &[Position], point: &Position) -> bool {
 /// let feature = process_band_from_cells(&grid, 10.0, 20.0);
 /// ```
 pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper: f64) -> Feature {
+    process_band_from_cells_with_precision(data, lower, upper, DEFAULT_PRECISION)
+}
+
+/// Process a single isoband level with configurable coordinate precision
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GridCell structs
+/// * `lower` - Lower threshold for this isoband
+/// * `upper` - Upper threshold for this isoband
+/// * `precision` - Number of decimal places for coordinates (1-6 recommended)
+pub fn process_band_from_cells_with_precision(
+    data: &[Vec<crate::GridCell>],
+    lower: f64,
+    upper: f64,
+    precision: u32,
+) -> Feature {
     let band_start = std::time::Instant::now();
     let rows = data.len();
     let cols = data[0].len();
@@ -803,7 +838,7 @@ pub fn process_band_from_cells(data: &[Vec<crate::GridCell>], lower: f64, upper:
                 if let Some(cell) = &cells[r][c] {
                     if !cell.is_cleared() {
                         // Found an unprocessed polygon - recursively walk it and its holes
-                        let polygon = walk_polygon_recursive(&mut cells, data, lower, upper, r, c, &mut processed);
+                        let polygon = walk_polygon_recursive_with_precision(&mut cells, data, lower, upper, r, c, &mut processed, precision);
                         if !polygon.is_empty() && !polygon[0].is_empty() {
                             polygons.push(polygon);
                         }
@@ -963,10 +998,26 @@ pub fn do_concurrent_from_cells(
     data: &[Vec<crate::GridCell>],
     isobands: &[f64],
 ) -> geojson::FeatureCollection {
+    do_concurrent_from_cells_with_precision(data, isobands, DEFAULT_PRECISION)
+}
+
+/// Process multiple isoband levels with configurable coordinate precision
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GridCell structs
+/// * `isobands` - Sorted list of threshold values
+/// * `precision` - Number of decimal places for coordinates (1-6 recommended)
+///   - 1 = ~11 km, 2 = ~1.1 km, 3 = ~110 m, 4 = ~11 m, 5 = ~1.1 m, 6 = ~0.11 m
+pub fn do_concurrent_from_cells_with_precision(
+    data: &[Vec<crate::GridCell>],
+    isobands: &[f64],
+    precision: u32,
+) -> geojson::FeatureCollection {
     // Note: rayon removed for sequential processing test
 
-    eprintln!("[geo-marching-squares] do_concurrent_from_cells: Starting with {} thresholds, {} bands to generate",
-        isobands.len(), isobands.len().saturating_sub(1));
+    eprintln!("[geo-marching-squares] do_concurrent_from_cells: Starting with {} thresholds, {} bands to generate (precision={})",
+        isobands.len(), isobands.len().saturating_sub(1), precision);
     eprintln!("[geo-marching-squares] Grid size: {}x{} = {} cells",
         data.len(),
         if data.is_empty() { 0 } else { data[0].len() },
@@ -979,7 +1030,7 @@ pub fn do_concurrent_from_cells(
             eprintln!("[geo-marching-squares] Band {}/{}: Processing [{}, {})",
                 i + 1, isobands.len() - 1, isobands[i], isobands[i + 1]);
             // Each iteration processes one isoband level
-            let result = process_band_from_cells(data, isobands[i], isobands[i + 1]);
+            let result = process_band_from_cells_with_precision(data, isobands[i], isobands[i + 1], precision);
             eprintln!("[geo-marching-squares] Band {}/{}: Completed", i + 1, isobands.len() - 1);
             result
         })
@@ -1122,6 +1173,15 @@ pub fn process_line(data: &[Vec<Feature>], isovalue: f64) -> Feature {
 /// let feature = process_line_from_cells(&grid, 15.0);
 /// ```
 pub fn process_line_from_cells(data: &[Vec<crate::GridCell>], isovalue: f64) -> Feature {
+    process_line_from_cells_with_precision(data, isovalue, DEFAULT_PRECISION)
+}
+
+/// Process a single isoline with configurable coordinate precision
+pub fn process_line_from_cells_with_precision(
+    data: &[Vec<crate::GridCell>],
+    isovalue: f64,
+    precision: u32,
+) -> Feature {
     let rows = data.len();
     let cols = data[0].len();
 
@@ -1155,7 +1215,7 @@ pub fn process_line_from_cells(data: &[Vec<crate::GridCell>], isovalue: f64) -> 
         }
     }
 
-    let polylines = assembler.assemble();
+    let polylines = assembler.assemble_with_precision(precision);
 
     // Build MultiLineString geometry
     let multi_linestring = GeoValue::MultiLineString(polylines);
@@ -1259,11 +1319,27 @@ pub fn do_concurrent_lines_from_cells(
     data: &[Vec<crate::GridCell>],
     isovalues: &[f64],
 ) -> geojson::FeatureCollection {
+    do_concurrent_lines_from_cells_with_precision(data, isovalues, DEFAULT_PRECISION)
+}
+
+/// Generate multiple isolines with configurable coordinate precision
+///
+/// # Arguments
+///
+/// * `data` - 2D array of GridCell structs
+/// * `isovalues` - Array of contour level values
+/// * `precision` - Number of decimal places for coordinates (1-6 recommended)
+///   - 1 = ~11 km, 2 = ~1.1 km, 3 = ~110 m, 4 = ~11 m, 5 = ~1.1 m, 6 = ~0.11 m
+pub fn do_concurrent_lines_from_cells_with_precision(
+    data: &[Vec<crate::GridCell>],
+    isovalues: &[f64],
+    precision: u32,
+) -> geojson::FeatureCollection {
     use rayon::prelude::*;
 
     let features: Vec<Feature> = isovalues
         .par_iter()
-        .map(|&isovalue| process_line_from_cells(data, isovalue))
+        .map(|&isovalue| process_line_from_cells_with_precision(data, isovalue, precision))
         .filter(|feature| has_line_coordinates(feature))
         .collect();
 
@@ -1280,10 +1356,14 @@ mod tests {
 
     #[test]
     fn test_round_coord() {
-        assert_eq!(round_coord(1.234567), 1.23457);
-        assert_eq!(round_coord(1.234564), 1.23456);
-        assert_eq!(round_coord(-122.123456789), -122.12346);
-        assert_eq!(round_coord(45.678901234), 45.6789);
+        // Test with default precision (5 decimals)
+        assert_eq!(round_coord_with_precision(1.234567, 5), 1.23457);
+        assert_eq!(round_coord_with_precision(1.234564, 5), 1.23456);
+        assert_eq!(round_coord_with_precision(-122.123456789, 5), -122.12346);
+        assert_eq!(round_coord_with_precision(45.678901234, 5), 45.6789);
+        // Test with lower precision
+        assert_eq!(round_coord_with_precision(45.678901234, 3), 45.679);
+        assert_eq!(round_coord_with_precision(45.678901234, 2), 45.68);
     }
 
     #[test]

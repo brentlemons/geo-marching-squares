@@ -125,9 +125,15 @@ pub use point::{Point, Side};
 pub use edge::{Edge, EdgeType, Move};
 pub use shape::{Shape, ShapeType};
 pub use cell::{Cell, LineSegment};
-pub use marching_squares::{process_band, do_concurrent, process_line, do_concurrent_lines,
-                            process_band_from_cells, do_concurrent_from_cells,
-                            process_line_from_cells, do_concurrent_lines_from_cells};
+pub use marching_squares::{
+    process_band, do_concurrent, process_line, do_concurrent_lines,
+    process_band_from_cells, do_concurrent_from_cells,
+    process_line_from_cells, do_concurrent_lines_from_cells,
+    // Precision-aware variants
+    process_band_from_cells_with_precision, do_concurrent_from_cells_with_precision,
+    process_line_from_cells_with_precision, do_concurrent_lines_from_cells_with_precision,
+    DEFAULT_PRECISION,
+};
 pub use grid_cell::GridCell;
 
 #[cfg(test)]
