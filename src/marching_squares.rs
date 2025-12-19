@@ -348,8 +348,11 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
     eprintln!("[geo-marching-squares] ⏱️  Polygon Nesting Resolution: {:?} ({} final polygons)",
         nesting_elapsed, polygons.len());
 
+    // Orient polygons to follow RFC 7946 right-hand rule
+    let oriented_polygons = orient_polygons(polygons);
+
     // Build MultiPolygon geometry
-    let multi_polygon = GeoValue::MultiPolygon(polygons);
+    let multi_polygon = GeoValue::MultiPolygon(oriented_polygons);
 
     // Create Feature with properties
     let mut feature = Feature {
@@ -739,6 +742,66 @@ fn polygon_contains_point(ring: &[Position], point: &Position) -> bool {
     inside
 }
 
+/// Compute signed area of a ring using the shoelace formula
+/// Positive = counter-clockwise, Negative = clockwise
+fn signed_area(ring: &[Position]) -> f64 {
+    if ring.len() < 3 {
+        return 0.0;
+    }
+
+    let mut area = 0.0;
+    let n = ring.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        area += ring[i][0] * ring[j][1];
+        area -= ring[j][0] * ring[i][1];
+    }
+    area / 2.0
+}
+
+/// Check if a ring is counter-clockwise (positive signed area)
+fn is_ccw(ring: &[Position]) -> bool {
+    signed_area(ring) > 0.0
+}
+
+/// Reverse the winding order of a ring
+fn reverse_ring(ring: &mut [Position]) {
+    ring.reverse();
+}
+
+/// Orient polygons to follow RFC 7946 right-hand rule:
+/// - Exterior rings: counter-clockwise (CCW)
+/// - Interior rings (holes): clockwise (CW)
+///
+/// This ensures GeoJSON compliance and correct rendering in mapping libraries.
+fn orient_polygons(polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec<Position>>> {
+    polygons
+        .into_iter()
+        .map(|mut polygon| {
+            for (i, ring) in polygon.iter_mut().enumerate() {
+                if ring.len() < 3 {
+                    continue;
+                }
+
+                let ccw = is_ccw(ring);
+
+                if i == 0 {
+                    // Exterior ring should be CCW
+                    if !ccw {
+                        reverse_ring(ring);
+                    }
+                } else {
+                    // Interior rings (holes) should be CW
+                    if ccw {
+                        reverse_ring(ring);
+                    }
+                }
+            }
+            polygon
+        })
+        .collect()
+}
+
 /// Process a single isoband level from GridCell data (memory-efficient)
 ///
 /// This is the high-performance alternative to `process_band()` for large grids.
@@ -859,12 +922,18 @@ pub fn process_band_from_cells_with_precision(
     eprintln!("[geo-marching-squares] ⏱️  Polygon Nesting: {:?} ({} final polygons)",
         nesting_elapsed, hierarchical_polygons.len());
 
+    // Orient polygons to follow RFC 7946 right-hand rule
+    let orient_start = std::time::Instant::now();
+    let oriented_polygons = orient_polygons(hierarchical_polygons);
+    let orient_elapsed = orient_start.elapsed();
+    eprintln!("[geo-marching-squares] ⏱️  Polygon Orientation (RFC 7946): {:?}", orient_elapsed);
+
     eprintln!("[geo-marching-squares] process_band_from_cells: Polygon processing complete, building feature with {} polygons",
-        hierarchical_polygons.len());
+        oriented_polygons.len());
 
     // Build MultiPolygon geometry
     let geometry_start = std::time::Instant::now();
-    let multi_polygon = GeoValue::MultiPolygon(hierarchical_polygons);
+    let multi_polygon = GeoValue::MultiPolygon(oriented_polygons);
 
     // Create Feature with properties
     let mut feature = Feature {
@@ -1398,5 +1467,103 @@ mod tests {
         assert!(polygon_in_polygon(&inside, &container));
         assert!(!polygon_in_polygon(&outside, &container));
         assert!(!polygon_in_polygon(&container, &inside));
+    }
+
+    #[test]
+    fn test_signed_area_ccw() {
+        // Counter-clockwise square (positive area)
+        let ccw_ring = vec![
+            vec![0.0, 0.0],
+            vec![10.0, 0.0],
+            vec![10.0, 10.0],
+            vec![0.0, 10.0],
+            vec![0.0, 0.0],
+        ];
+        assert!(signed_area(&ccw_ring) > 0.0);
+        assert!(is_ccw(&ccw_ring));
+    }
+
+    #[test]
+    fn test_signed_area_cw() {
+        // Clockwise square (negative area)
+        let cw_ring = vec![
+            vec![0.0, 0.0],
+            vec![0.0, 10.0],
+            vec![10.0, 10.0],
+            vec![10.0, 0.0],
+            vec![0.0, 0.0],
+        ];
+        assert!(signed_area(&cw_ring) < 0.0);
+        assert!(!is_ccw(&cw_ring));
+    }
+
+    #[test]
+    fn test_orient_polygons_fixes_exterior() {
+        // Clockwise exterior (wrong) - should be fixed to CCW
+        let cw_exterior = vec![
+            vec![0.0, 0.0],
+            vec![0.0, 10.0],
+            vec![10.0, 10.0],
+            vec![10.0, 0.0],
+            vec![0.0, 0.0],
+        ];
+        let polygons = vec![vec![cw_exterior]];
+        let oriented = orient_polygons(polygons);
+
+        // After orientation, exterior should be CCW
+        assert!(is_ccw(&oriented[0][0]));
+    }
+
+    #[test]
+    fn test_orient_polygons_fixes_hole() {
+        // CCW exterior (correct) with CCW hole (wrong - should be CW)
+        let ccw_exterior = vec![
+            vec![0.0, 0.0],
+            vec![10.0, 0.0],
+            vec![10.0, 10.0],
+            vec![0.0, 10.0],
+            vec![0.0, 0.0],
+        ];
+        let ccw_hole = vec![
+            vec![2.0, 2.0],
+            vec![8.0, 2.0],
+            vec![8.0, 8.0],
+            vec![2.0, 8.0],
+            vec![2.0, 2.0],
+        ];
+        let polygons = vec![vec![ccw_exterior, ccw_hole]];
+        let oriented = orient_polygons(polygons);
+
+        // After orientation: exterior CCW, hole CW
+        assert!(is_ccw(&oriented[0][0]));  // exterior is CCW
+        assert!(!is_ccw(&oriented[0][1])); // hole is CW
+    }
+
+    #[test]
+    fn test_orient_polygons_preserves_correct() {
+        // Already correct: CCW exterior, CW hole
+        let ccw_exterior = vec![
+            vec![0.0, 0.0],
+            vec![10.0, 0.0],
+            vec![10.0, 10.0],
+            vec![0.0, 10.0],
+            vec![0.0, 0.0],
+        ];
+        let cw_hole = vec![
+            vec![2.0, 2.0],
+            vec![2.0, 8.0],
+            vec![8.0, 8.0],
+            vec![8.0, 2.0],
+            vec![2.0, 2.0],
+        ];
+        let original_exterior = ccw_exterior.clone();
+        let original_hole = cw_hole.clone();
+
+        let polygons = vec![vec![ccw_exterior, cw_hole]];
+        let oriented = orient_polygons(polygons);
+
+        // Should be unchanged
+        assert_eq!(oriented[0][0], original_exterior);
+        assert_eq!(oriented[0][1], original_hole);
     }
 }
