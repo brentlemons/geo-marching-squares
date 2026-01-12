@@ -174,16 +174,12 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
     let cell_rows = cells.len();
     let cell_cols = cells[0].len();
 
-    let edge_walking_start = std::time::Instant::now();
     let mut hold_polygons: VecDeque<Vec<Vec<Position>>> = VecDeque::new();
-    let mut cells_with_shapes = 0;
-    let mut total_edges_found = 0;
 
     // Walk edges to form polygons
     for r in 0..cell_rows {
         for c in 0..cell_cols {
             if let Some(cell) = &mut cells[r][c] {
-                cells_with_shapes += 1;
                 if !cell.is_cleared() {
                     let mut y = r;
                     let mut x = c;
@@ -243,7 +239,6 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
                                 }
                                 Move::Unknown => {
                                     go_on = false;
-                                    eprintln!("Unknown edge move at ({}, {})", y, x);
                                 }
                             }
                         }
@@ -251,7 +246,6 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
 
                     // Convert edges to polygon coordinates
                     if !edges.is_empty() {
-                        total_edges_found += edges.len();
                         let mut ring: Vec<Position> = Vec::new();
 
                         // Add first edge's start point
@@ -275,17 +269,7 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
         }
     }
 
-    let edge_walking_elapsed = edge_walking_start.elapsed();
-    eprintln!(
-        "[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} shapes, {} total edges, {} polygons)",
-        edge_walking_elapsed,
-        cells_with_shapes,
-        total_edges_found,
-        hold_polygons.len()
-    );
-
     // Resolve polygon nesting (exterior vs interior rings) with spatial optimization
-    let nesting_start = std::time::Instant::now();
     // Pre-compute bounding boxes for all polygons to avoid expensive polygon-in-polygon tests
     let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
     let mut polygon_bboxes: Vec<BBox> = Vec::new();
@@ -356,12 +340,6 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
             polygon_bboxes.push(subject_bbox);
         }
     }
-    let nesting_elapsed = nesting_start.elapsed();
-    eprintln!(
-        "[geo-marching-squares] ⏱️  Polygon Nesting Resolution: {:?} ({} final polygons)",
-        nesting_elapsed,
-        polygons.len()
-    );
 
     // Orient polygons to follow RFC 7946 right-hand rule
     let oriented_polygons = orient_polygons(polygons);
@@ -499,34 +477,6 @@ fn walk_polygon_recursive_with_precision(
         }
     }
 
-    // Detect winding direction using shoelace formula (signed area)
-    let winding = if exterior_ring.len() >= 3 {
-        let mut signed_area = 0.0;
-        let n = exterior_ring.len();
-        for i in 0..n {
-            let j = (i + 1) % n;
-            signed_area += exterior_ring[i][0] * exterior_ring[j][1];
-            signed_area -= exterior_ring[j][0] * exterior_ring[i][1];
-        }
-        if signed_area > 0.0 {
-            "counter-clockwise"
-        } else {
-            "clockwise"
-        }
-    } else {
-        "unknown"
-    };
-
-    eprintln!(
-        "[geo-marching-squares] Polygon at ({}, {}) winding: {}, edges: {}",
-        start_r,
-        start_c,
-        winding,
-        exterior_ring.len()
-    );
-
-    // Return just the exterior ring - containment will be determined in post-processing
-    // No more flood fill or recursive hole processing
     vec![exterior_ring]
 }
 
@@ -550,22 +500,18 @@ struct PolygonMeta {
 /// 3. For each clockwise polygon at root level, attach its holes
 /// 4. Nested clockwise polygons (islands in holes) become separate polygons
 pub fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec<Position>>> {
-    let hierarchy_start = std::time::Instant::now();
-
     if raw_polygons.is_empty() {
         return vec![];
     }
 
     // Step 1: Build metadata for all polygons (just exterior rings)
-    let metadata_start = std::time::Instant::now();
     let metas: Vec<PolygonMeta> = raw_polygons
         .into_iter()
-        .enumerate()
-        .filter_map(|(_idx, mut poly)| {
+        .filter_map(|mut poly| {
             if poly.is_empty() || poly[0].is_empty() {
                 return None;
             }
-            let ring = poly.remove(0); // Take just the exterior ring
+            let ring = poly.remove(0);
             let bbox = BBox::from_ring(&ring);
             let is_clockwise = compute_winding(&ring) == "clockwise";
             Some(PolygonMeta {
@@ -575,148 +521,86 @@ pub fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec
             })
         })
         .collect();
-    let metadata_elapsed = metadata_start.elapsed();
-
-    let cw_count = metas.iter().filter(|m| m.is_clockwise).count();
-    let ccw_count = metas.iter().filter(|m| !m.is_clockwise).count();
-    eprintln!("[geo-marching-squares]   ⏱️  Metadata (bbox+winding): {:?} for {} polygons ({} CW, {} CCW)",
-        metadata_elapsed, metas.len(), cw_count, ccw_count);
 
     // Step 2: Find container for each counter-clockwise polygon (holes)
-    let hole_containment_start = std::time::Instant::now();
     let mut hole_containers: Vec<Option<usize>> = vec![None; metas.len()];
-    let mut bbox_checks = 0usize;
-    let mut pip_checks = 0usize;
 
     for i in 0..metas.len() {
         if !metas[i].is_clockwise {
-            // This is a hole - find its clockwise container (early exit on first match)
-            let mut container: Option<usize> = None;
-
             for j in 0..metas.len() {
                 if i == j || !metas[j].is_clockwise {
-                    continue; // Skip self and other holes
+                    continue;
                 }
-
-                bbox_checks += 1;
-                // Quick bbox check first
                 if !metas[i].bbox.is_inside(&metas[j].bbox) {
                     continue;
                 }
-
-                pip_checks += 1;
-                // Point-in-polygon check - test first point of hole against container
-                if metas[i].ring.len() > 0
+                if !metas[i].ring.is_empty()
                     && polygon_contains_point(&metas[j].ring, &metas[i].ring[0])
                 {
-                    // Found a container! Early exit instead of finding smallest
-                    container = Some(j);
+                    hole_containers[i] = Some(j);
                     break;
                 }
             }
-
-            hole_containers[i] = container;
-            if container.is_none() {
-                eprintln!("[geo-marching-squares]   WARNING: Counter-clockwise polygon {} has no container", i);
-            }
         }
     }
-    let hole_containment_elapsed = hole_containment_start.elapsed();
-    eprintln!("[geo-marching-squares]   ⏱️  Hole Containment: {:?} ({} bbox checks, {} point-in-poly checks)",
-        hole_containment_elapsed, bbox_checks, pip_checks);
 
     // Step 3: For each clockwise polygon, find if it's nested inside a hole
-    let island_containment_start = std::time::Instant::now();
     let mut cw_containers: Vec<Option<usize>> = vec![None; metas.len()];
-    let mut island_bbox_checks = 0usize;
-    let mut island_pip_checks = 0usize;
 
     for i in 0..metas.len() {
         if metas[i].is_clockwise {
-            // Check if this clockwise polygon is inside a counter-clockwise polygon (island in hole)
             for j in 0..metas.len() {
                 if i == j || metas[j].is_clockwise {
                     continue;
                 }
-
-                island_bbox_checks += 1;
                 if !metas[i].bbox.is_inside(&metas[j].bbox) {
                     continue;
                 }
-
-                island_pip_checks += 1;
-                if metas[i].ring.len() > 0
+                if !metas[i].ring.is_empty()
                     && polygon_contains_point(&metas[j].ring, &metas[i].ring[0])
                 {
                     cw_containers[i] = Some(j);
-                    break; // Found container
+                    break;
                 }
             }
         }
     }
-    let island_containment_elapsed = island_containment_start.elapsed();
-    eprintln!("[geo-marching-squares]   ⏱️  Island Containment: {:?} ({} bbox checks, {} point-in-poly checks)",
-        island_containment_elapsed, island_bbox_checks, island_pip_checks);
 
     // Step 4: Build final polygon structure
-    let assembly_start = std::time::Instant::now();
-    // Root-level clockwise polygons (not inside any hole) become top-level multipolygon entries
     let mut result: Vec<Vec<Vec<Position>>> = Vec::new();
 
+    // Root-level clockwise polygons
     for i in 0..metas.len() {
         if metas[i].is_clockwise && cw_containers[i].is_none() {
-            // This is a root-level clockwise polygon
             let mut polygon = vec![metas[i].ring.clone()];
-
-            // Attach its holes (counter-clockwise polygons that have this as container)
             for j in 0..metas.len() {
                 if !metas[j].is_clockwise && hole_containers[j] == Some(i) {
                     polygon.push(metas[j].ring.clone());
                 }
             }
-
             result.push(polygon);
         }
     }
 
-    // Also add islands (clockwise polygons inside holes) as separate polygons
+    // Islands (clockwise polygons inside holes)
     for i in 0..metas.len() {
         if metas[i].is_clockwise && cw_containers[i].is_some() {
-            // This is an island - add as separate polygon with its own holes
             let mut polygon = vec![metas[i].ring.clone()];
-
-            // Find holes inside this island
             for j in 0..metas.len() {
                 if !metas[j].is_clockwise && hole_containers[j] == Some(i) {
                     polygon.push(metas[j].ring.clone());
                 }
             }
-
             result.push(polygon);
         }
     }
 
-    // Handle orphan counter-clockwise polygons (holes with no container)
-    // These can occur at grid boundaries or in test cases with small grids
-    // Treat them as standalone polygons (they'll appear as "inverted" shapes)
+    // Orphan counter-clockwise polygons (holes with no container)
     for i in 0..metas.len() {
         if !metas[i].is_clockwise && hole_containers[i].is_none() {
-            // Lone CCW polygon - add as standalone
             result.push(vec![metas[i].ring.clone()]);
         }
     }
-    let assembly_elapsed = assembly_start.elapsed();
-    let hierarchy_total = hierarchy_start.elapsed();
-
-    eprintln!(
-        "[geo-marching-squares]   ⏱️  Polygon Assembly: {:?} ({} output polygons)",
-        assembly_elapsed,
-        result.len()
-    );
-    eprintln!(
-        "[geo-marching-squares]   ⏱️  TOTAL HIERARCHY: {:?}",
-        hierarchy_total
-    );
 
     result
 }
@@ -876,14 +760,8 @@ pub fn process_band_from_cells_with_precision(
     upper: f64,
     precision: u32,
 ) -> Feature {
-    let band_start = std::time::Instant::now();
     let rows = data.len();
     let cols = data[0].len();
-
-    eprintln!(
-        "[geo-marching-squares] process_band_from_cells: Starting band [{}, {}) on {}x{} grid",
-        lower, upper, rows, cols
-    );
 
     // Create cells from grid (rows-1 × cols-1)
     let mut cells: Vec<Vec<Option<Shape>>> = Vec::with_capacity(rows - 1);
@@ -891,11 +769,6 @@ pub fn process_band_from_cells_with_precision(
         cells.push(vec![None; cols - 1]);
     }
 
-    let classification_start = std::time::Instant::now();
-    eprintln!(
-        "[geo-marching-squares] process_band_from_cells: Creating {} cells",
-        (rows - 1) * (cols - 1)
-    );
     for r in 0..rows - 1 {
         for c in 0..cols - 1 {
             cells[r][c] = Shape::create_from_cells(
@@ -914,31 +787,19 @@ pub fn process_band_from_cells_with_precision(
             );
         }
     }
-    let classification_elapsed = classification_start.elapsed();
 
     let cell_rows = cells.len();
     let cell_cols = cells[0].len();
 
-    eprintln!(
-        "[geo-marching-squares] ⏱️  Shape Classification: {:?}",
-        classification_elapsed
-    );
-    eprintln!("[geo-marching-squares] process_band_from_cells: Cells created, now walking edges");
-
-    // Recursive polygon walking with automatic hole detection
-    let recursive_start = std::time::Instant::now();
+    // Walk grid in order, recursively processing polygons and their holes
     let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
     let mut processed = std::collections::HashSet::new();
 
-    eprintln!("[geo-marching-squares] process_band_from_cells: Walking edges with recursive hole detection");
-
-    // Walk grid in order, recursively processing polygons and their holes
     for r in 0..cell_rows {
         for c in 0..cell_cols {
             if !processed.contains(&(r, c)) {
                 if let Some(cell) = &cells[r][c] {
                     if !cell.is_cleared() {
-                        // Found an unprocessed polygon - recursively walk it and its holes
                         let polygon = walk_polygon_recursive_with_precision(
                             &mut cells,
                             data,
@@ -958,40 +819,13 @@ pub fn process_band_from_cells_with_precision(
         }
     }
 
-    let recursive_elapsed = recursive_start.elapsed();
-    eprintln!(
-        "[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} raw polygons)",
-        recursive_elapsed,
-        polygons.len()
-    );
-
-    // Build containment hierarchy using winding direction + bbox optimization
-    let nesting_start = std::time::Instant::now();
+    // Build containment hierarchy and orient polygons
     let hierarchical_polygons = build_polygon_hierarchy(polygons);
-    let nesting_elapsed = nesting_start.elapsed();
-    eprintln!(
-        "[geo-marching-squares] ⏱️  Polygon Nesting: {:?} ({} final polygons)",
-        nesting_elapsed,
-        hierarchical_polygons.len()
-    );
-
-    // Orient polygons to follow RFC 7946 right-hand rule
-    let orient_start = std::time::Instant::now();
     let oriented_polygons = orient_polygons(hierarchical_polygons);
-    let orient_elapsed = orient_start.elapsed();
-    eprintln!(
-        "[geo-marching-squares] ⏱️  Polygon Orientation (RFC 7946): {:?}",
-        orient_elapsed
-    );
-
-    eprintln!("[geo-marching-squares] process_band_from_cells: Polygon processing complete, building feature with {} polygons",
-        oriented_polygons.len());
 
     // Build MultiPolygon geometry
-    let geometry_start = std::time::Instant::now();
     let multi_polygon = GeoValue::MultiPolygon(oriented_polygons);
 
-    // Create Feature with properties
     let mut feature = Feature {
         bbox: None,
         geometry: Some(Geometry::new(multi_polygon)),
@@ -1004,21 +838,6 @@ pub fn process_band_from_cells_with_precision(
         props.insert("lower_level".to_string(), serde_json::json!(lower));
         props.insert("upper_level".to_string(), serde_json::json!(upper));
     }
-    let geometry_elapsed = geometry_start.elapsed();
-    let total_elapsed = band_start.elapsed();
-
-    eprintln!(
-        "[geo-marching-squares] ⏱️  Geometry Building: {:?}",
-        geometry_elapsed
-    );
-    eprintln!(
-        "[geo-marching-squares] ⏱️  TOTAL BAND TIME: {:?}",
-        total_elapsed
-    );
-    eprintln!(
-        "[geo-marching-squares] process_band_from_cells: Feature complete for band [{}, {})",
-        lower, upper
-    );
 
     feature
 }
@@ -1145,54 +964,13 @@ pub fn do_concurrent_from_cells_with_precision(
     isobands: &[f64],
     precision: u32,
 ) -> geojson::FeatureCollection {
-    // Note: rayon removed for sequential processing test
-
-    eprintln!("[geo-marching-squares] do_concurrent_from_cells: Starting with {} thresholds, {} bands to generate (precision={})",
-        isobands.len(), isobands.len().saturating_sub(1), precision);
-    eprintln!(
-        "[geo-marching-squares] Grid size: {}x{} = {} cells",
-        data.len(),
-        if data.is_empty() { 0 } else { data[0].len() },
-        data.len() * if data.is_empty() { 0 } else { data[0].len() }
-    );
-
-    // Process each isoband pair sequentially (testing performance)
     let features: Vec<Feature> = (0..isobands.len() - 1)
-        .into_iter() // Changed from into_par_iter() for sequential processing
         .map(|i| {
-            eprintln!(
-                "[geo-marching-squares] Band {}/{}: Processing [{}, {})",
-                i + 1,
-                isobands.len() - 1,
-                isobands[i],
-                isobands[i + 1]
-            );
-            // Each iteration processes one isoband level
-            let result = process_band_from_cells_with_precision(
-                data,
-                isobands[i],
-                isobands[i + 1],
-                precision,
-            );
-            eprintln!(
-                "[geo-marching-squares] Band {}/{}: Completed",
-                i + 1,
-                isobands.len() - 1
-            );
-            result
+            process_band_from_cells_with_precision(data, isobands[i], isobands[i + 1], precision)
         })
-        .filter(|feature| {
-            // Filter out empty features (no geometry)
-            has_coordinates(feature)
-        })
+        .filter(|feature| has_coordinates(feature))
         .collect();
 
-    eprintln!(
-        "[geo-marching-squares] do_concurrent_from_cells: Completed, generated {} features",
-        features.len()
-    );
-
-    // Build and return FeatureCollection
     geojson::FeatureCollection {
         bbox: None,
         foreign_members: None,

@@ -129,7 +129,11 @@ pub struct CompactEdge {
 impl CompactEdge {
     #[inline]
     pub fn new(start: CompactPoint, end: CompactPoint, move_dir: MoveDir) -> Self {
-        Self { start, end, move_dir }
+        Self {
+            start,
+            end,
+            move_dir,
+        }
     }
 }
 
@@ -207,8 +211,8 @@ impl CompactCell {
         let bl_class = Ternary::classify(bl, lower, upper);
 
         // Encode as single value: tl*27 + tr*9 + br*3 + bl (base-3 encoding)
-        let class_value = (tl_class as u8) * 27 + (tr_class as u8) * 9
-                        + (br_class as u8) * 3 + (bl_class as u8);
+        let class_value =
+            (tl_class as u8) * 27 + (tr_class as u8) * 9 + (br_class as u8) * 3 + (bl_class as u8);
 
         // Early exit: if all corners are the same, no contour passes through
         // class_value 0 = all Below (0*27 + 0*9 + 0*3 + 0)
@@ -219,10 +223,18 @@ impl CompactCell {
         }
 
         let mut boundary_flags = 0u8;
-        if is_top { boundary_flags |= Self::TOP_EDGE; }
-        if is_right { boundary_flags |= Self::RIGHT_EDGE; }
-        if is_bottom { boundary_flags |= Self::BOTTOM_EDGE; }
-        if is_left { boundary_flags |= Self::LEFT_EDGE; }
+        if is_top {
+            boundary_flags |= Self::TOP_EDGE;
+        }
+        if is_right {
+            boundary_flags |= Self::RIGHT_EDGE;
+        }
+        if is_bottom {
+            boundary_flags |= Self::BOTTOM_EDGE;
+        }
+        if is_left {
+            boundary_flags |= Self::LEFT_EDGE;
+        }
 
         Some(Self {
             col: col as u16,
@@ -286,52 +298,76 @@ impl CompactCell {
         let top_lower = if (tl_class == Ternary::Below) != (tr_class == Ternary::Below) {
             let t = Self::lerp(self.tl, self.tr, lower);
             Some(CompactPoint::coord(col + t, row))
-        } else { None };
+        } else {
+            None
+        };
 
         let top_upper = if (tl_class == Ternary::Above) != (tr_class == Ternary::Above) {
             let t = Self::lerp(self.tl, self.tr, upper);
             Some(CompactPoint::coord(col + t, row))
-        } else { None };
+        } else {
+            None
+        };
 
         // Right edge (tr to br)
         let right_lower = if (tr_class == Ternary::Below) != (br_class == Ternary::Below) {
             let t = Self::lerp(self.tr, self.br, lower);
             Some(CompactPoint::coord(col + 1.0, row + t))
-        } else { None };
+        } else {
+            None
+        };
 
         let right_upper = if (tr_class == Ternary::Above) != (br_class == Ternary::Above) {
             let t = Self::lerp(self.tr, self.br, upper);
             Some(CompactPoint::coord(col + 1.0, row + t))
-        } else { None };
+        } else {
+            None
+        };
 
         // Bottom edge (br to bl)
         let bottom_lower = if (br_class == Ternary::Below) != (bl_class == Ternary::Below) {
             let t = Self::lerp(self.br, self.bl, lower);
             Some(CompactPoint::coord(col + 1.0 - t, row + 1.0))
-        } else { None };
+        } else {
+            None
+        };
 
         let bottom_upper = if (br_class == Ternary::Above) != (bl_class == Ternary::Above) {
             let t = Self::lerp(self.br, self.bl, upper);
             Some(CompactPoint::coord(col + 1.0 - t, row + 1.0))
-        } else { None };
+        } else {
+            None
+        };
 
         // Left edge (bl to tl)
         let left_lower = if (bl_class == Ternary::Below) != (tl_class == Ternary::Below) {
             let t = Self::lerp(self.bl, self.tl, lower);
             Some(CompactPoint::coord(col, row + 1.0 - t))
-        } else { None };
+        } else {
+            None
+        };
 
         let left_upper = if (bl_class == Ternary::Above) != (tl_class == Ternary::Above) {
             let t = Self::lerp(self.bl, self.tl, upper);
             Some(CompactPoint::coord(col, row + 1.0 - t))
-        } else { None };
+        } else {
+            None
+        };
 
         // Build edges based on the isoband pattern
         // This is a simplified version - the full implementation needs all 81 cases
         self.connect_edges(
             &mut edges,
-            [top_lower, top_upper, right_lower, right_upper,
-             bottom_lower, bottom_upper, left_lower, left_upper],
+            [
+                top_lower,
+                top_upper,
+                right_lower,
+                right_upper,
+                bottom_lower,
+                bottom_upper,
+                left_lower,
+                left_upper,
+            ],
             [tl_class, tr_class, br_class, bl_class],
         );
 
@@ -360,20 +396,36 @@ impl CompactCell {
         let mut crossings: ArrayVec<(CompactPoint, MoveDir), 8> = ArrayVec::new();
 
         // Top edge (left to right)
-        if let Some(p) = top_l { crossings.push((p, MoveDir::Up)); }
-        if let Some(p) = top_u { crossings.push((p, MoveDir::Up)); }
+        if let Some(p) = top_l {
+            crossings.push((p, MoveDir::Up));
+        }
+        if let Some(p) = top_u {
+            crossings.push((p, MoveDir::Up));
+        }
 
         // Right edge (top to bottom)
-        if let Some(p) = right_u { crossings.push((p, MoveDir::Right)); }
-        if let Some(p) = right_l { crossings.push((p, MoveDir::Right)); }
+        if let Some(p) = right_u {
+            crossings.push((p, MoveDir::Right));
+        }
+        if let Some(p) = right_l {
+            crossings.push((p, MoveDir::Right));
+        }
 
         // Bottom edge (right to left)
-        if let Some(p) = bottom_l { crossings.push((p, MoveDir::Down)); }
-        if let Some(p) = bottom_u { crossings.push((p, MoveDir::Down)); }
+        if let Some(p) = bottom_l {
+            crossings.push((p, MoveDir::Down));
+        }
+        if let Some(p) = bottom_u {
+            crossings.push((p, MoveDir::Down));
+        }
 
         // Left edge (bottom to top)
-        if let Some(p) = left_u { crossings.push((p, MoveDir::Left)); }
-        if let Some(p) = left_l { crossings.push((p, MoveDir::Left)); }
+        if let Some(p) = left_u {
+            crossings.push((p, MoveDir::Left));
+        }
+        if let Some(p) = left_l {
+            crossings.push((p, MoveDir::Left));
+        }
 
         // For isobands, we connect lower-to-upper crossings to form the band boundary
         // This needs more sophisticated logic for saddle points and complex cases
@@ -451,7 +503,14 @@ pub fn process_band_optimized(
 
             // Create cell only if it contributes to the contour
             if let Some(cell) = CompactCell::new(
-                c, r, tl, tr, br, bl, lower, upper,
+                c,
+                r,
+                tl,
+                tr,
+                br,
+                bl,
+                lower,
+                upper,
                 r == 0,
                 c + 1 == cols - 1,
                 r + 1 == rows - 1,
@@ -478,7 +537,9 @@ pub fn process_band_optimized(
             continue;
         }
 
-        if let Some(ring) = walk_polygon_optimized(&mut cells, &mut processed, key, lower, upper, precision) {
+        if let Some(ring) =
+            walk_polygon_optimized(&mut cells, &mut processed, key, lower, upper, precision)
+        {
             if !ring.is_empty() {
                 // Wrap the ring as a polygon (exterior ring only, holes determined later)
                 polygons.push(vec![ring]);
@@ -537,9 +598,9 @@ pub fn process_band_optimized_hybrid(
     upper: f32,
     precision: u32,
 ) -> (Vec<crate::ContourPolygon>, crate::ContourMetrics) {
-    use std::time::Instant;
     use crate::shape::Shape;
     use crate::GridCell;
+    use std::time::Instant;
 
     let total_start = Instant::now();
     let rows = height;
@@ -558,15 +619,36 @@ pub fn process_band_optimized_hybrid(
     for r in 0..rows - 1 {
         for c in 0..cols - 1 {
             // Create GridCells for the four corners
-            let tl = GridCell { x: c as f64, y: r as f64, value: values[r * cols + c] as f64 };
-            let tr = GridCell { x: (c + 1) as f64, y: r as f64, value: values[r * cols + c + 1] as f64 };
-            let br = GridCell { x: (c + 1) as f64, y: (r + 1) as f64, value: values[(r + 1) * cols + c + 1] as f64 };
-            let bl = GridCell { x: c as f64, y: (r + 1) as f64, value: values[(r + 1) * cols + c] as f64 };
+            let tl = GridCell {
+                x: c as f64,
+                y: r as f64,
+                value: values[r * cols + c] as f64,
+            };
+            let tr = GridCell {
+                x: (c + 1) as f64,
+                y: r as f64,
+                value: values[r * cols + c + 1] as f64,
+            };
+            let br = GridCell {
+                x: (c + 1) as f64,
+                y: (r + 1) as f64,
+                value: values[(r + 1) * cols + c + 1] as f64,
+            };
+            let bl = GridCell {
+                x: c as f64,
+                y: (r + 1) as f64,
+                value: values[(r + 1) * cols + c] as f64,
+            };
 
             let shape = Shape::create_from_cells(
-                &tl, &tr, &br, &bl,
-                lower as f64, upper as f64,
-                c, r,
+                &tl,
+                &tr,
+                &br,
+                &bl,
+                lower as f64,
+                upper as f64,
+                c,
+                r,
                 r == 0,
                 c + 1 == cols - 1,
                 r + 1 == rows - 1,
@@ -602,12 +684,8 @@ pub fn process_band_optimized_hybrid(
 
         if should_walk {
             // Walk the polygon using sparse cell lookup
-            if let Some(ring) = walk_polygon_sparse(
-                &mut cells,
-                r, c,
-                rows - 1, cols - 1,
-                precision,
-            ) {
+            if let Some(ring) = walk_polygon_sparse(&mut cells, r, c, rows - 1, cols - 1, precision)
+            {
                 if ring.len() >= 3 {
                     polygons.push(vec![ring]);
                 }
@@ -889,24 +967,33 @@ mod tests {
     fn test_compact_point_size() {
         use std::mem::size_of;
         let size = size_of::<CompactPoint>();
-        eprintln!("CompactPoint size: {} bytes", size);
-        assert!(size <= 32, "CompactPoint should be <= 32 bytes, got {}", size);
+        assert!(
+            size <= 32,
+            "CompactPoint should be <= 32 bytes, got {}",
+            size
+        );
     }
 
     #[test]
     fn test_compact_cell_size() {
         use std::mem::size_of;
         let size = size_of::<CompactCell>();
-        eprintln!("CompactCell size: {} bytes", size);
-        assert!(size <= 32, "CompactCell should be <= 32 bytes, got {}", size);
+        assert!(
+            size <= 32,
+            "CompactCell should be <= 32 bytes, got {}",
+            size
+        );
     }
 
     #[test]
     fn test_compact_edge_size() {
         use std::mem::size_of;
         let size = size_of::<CompactEdge>();
-        eprintln!("CompactEdge size: {} bytes", size);
-        assert!(size <= 64, "CompactEdge should be <= 64 bytes, got {}", size);
+        assert!(
+            size <= 64,
+            "CompactEdge should be <= 64 bytes, got {}",
+            size
+        );
     }
 
     #[test]
@@ -919,33 +1006,37 @@ mod tests {
     #[test]
     fn test_cell_creation_empty() {
         // All corners below - should return None
-        let cell = CompactCell::new(0, 0, 5.0, 5.0, 5.0, 5.0, 10.0, 20.0, false, false, false, false);
+        let cell = CompactCell::new(
+            0, 0, 5.0, 5.0, 5.0, 5.0, 10.0, 20.0, false, false, false, false,
+        );
         assert!(cell.is_none());
 
         // All corners above - should return None
-        let cell = CompactCell::new(0, 0, 25.0, 25.0, 25.0, 25.0, 10.0, 20.0, false, false, false, false);
+        let cell = CompactCell::new(
+            0, 0, 25.0, 25.0, 25.0, 25.0, 10.0, 20.0, false, false, false, false,
+        );
         assert!(cell.is_none());
 
         // All corners within - should return None
-        let cell = CompactCell::new(0, 0, 15.0, 15.0, 15.0, 15.0, 10.0, 20.0, false, false, false, false);
+        let cell = CompactCell::new(
+            0, 0, 15.0, 15.0, 15.0, 15.0, 10.0, 20.0, false, false, false, false,
+        );
         assert!(cell.is_none());
     }
 
     #[test]
     fn test_cell_creation_contour() {
         // Mixed values - should create cell
-        let cell = CompactCell::new(0, 0, 5.0, 15.0, 15.0, 5.0, 10.0, 20.0, false, false, false, false);
+        let cell = CompactCell::new(
+            0, 0, 5.0, 15.0, 15.0, 5.0, 10.0, 20.0, false, false, false, false,
+        );
         assert!(cell.is_some());
     }
 
     #[test]
     fn test_sparse_storage() {
         // Create cells only for contour crossings
-        let values: Vec<f32> = vec![
-            5.0, 5.0, 5.0,
-            5.0, 15.0, 15.0,
-            5.0, 15.0, 15.0,
-        ];
+        let values: Vec<f32> = vec![5.0, 5.0, 5.0, 5.0, 15.0, 15.0, 5.0, 15.0, 15.0];
 
         let mut cells: CellMap = HashMap::new();
         let width = 3;
@@ -961,8 +1052,18 @@ mod tests {
                 let bl = values[(r + 1) * width + c];
 
                 if let Some(cell) = CompactCell::new(
-                    c, r, tl, tr, br, bl, lower, upper,
-                    r == 0, c + 1 == width - 1, r + 1 == height - 1, c == 0,
+                    c,
+                    r,
+                    tl,
+                    tr,
+                    br,
+                    bl,
+                    lower,
+                    upper,
+                    r == 0,
+                    c + 1 == width - 1,
+                    r + 1 == height - 1,
+                    c == 0,
                 ) {
                     cells.insert((c as u16, r as u16), cell);
                 }
@@ -970,77 +1071,73 @@ mod tests {
         }
 
         // Only cells on the contour boundary should be created
-        eprintln!("Created {} cells out of {} possible", cells.len(), (width-1) * (height-1));
-        assert!(cells.len() < (width - 1) * (height - 1), "Sparse storage should have fewer cells");
+        assert!(
+            cells.len() < (width - 1) * (height - 1),
+            "Sparse storage should have fewer cells"
+        );
     }
 
     #[test]
     fn test_process_band_optimized_simple() {
         // 3x3 grid with a high-value region
-        let values: Vec<f32> = vec![
-            5.0, 5.0, 5.0,
-            5.0, 15.0, 15.0,
-            5.0, 15.0, 15.0,
-        ];
+        let values: Vec<f32> = vec![5.0, 5.0, 5.0, 5.0, 15.0, 15.0, 5.0, 15.0, 15.0];
 
-        let (polygons, metrics) = process_band_optimized(&values, 3, 3, 10.0, 20.0, 5);
+        let (_polygons, metrics) = process_band_optimized(&values, 3, 3, 10.0, 20.0, 5);
 
-        eprintln!("Optimized result: {} polygons", polygons.len());
-        eprintln!("Classification: {:.2}ms", metrics.classification_ms);
-        eprintln!("Edge walking: {:.2}ms", metrics.edge_walking_ms);
-        eprintln!("Total: {:.2}ms", metrics.total_ms);
-
-        // Should produce at least one polygon
-        // Note: The simplified edge walking may not produce correct results yet
-        // This test is primarily to verify the code runs without errors
+        // Verify the optimized classification runs without errors
+        assert!(metrics.classification_ms >= 0.0);
     }
 
     #[test]
     fn test_compare_original_vs_optimized() {
         // Compare output of original and optimized implementations
-        let values: Vec<f32> = vec![
-            5.0, 5.0, 5.0,
-            5.0, 15.0, 15.0,
-            5.0, 15.0, 15.0,
-        ];
+        let values: Vec<f32> = vec![5.0, 5.0, 5.0, 5.0, 15.0, 15.0, 5.0, 15.0, 15.0];
 
         // Original
-        let (orig_polygons, orig_metrics) = crate::process_band_flat_with_metrics(&values, 3, 3, 10.0, 20.0, 5);
+        let (orig_polygons, _) =
+            crate::process_band_flat_with_metrics(&values, 3, 3, 10.0, 20.0, 5);
 
-        // Optimized
-        let (opt_polygons, opt_metrics) = process_band_optimized(&values, 3, 3, 10.0, 20.0, 5);
+        // Optimized (uses experimental edge walking, may not produce polygons)
+        let (_opt_polygons, opt_metrics) = process_band_optimized(&values, 3, 3, 10.0, 20.0, 5);
 
-        eprintln!("Original: {} polygons, {:.2}ms classification", orig_polygons.len(), orig_metrics.classification_ms);
-        eprintln!("Optimized: {} polygons, {:.2}ms classification", opt_polygons.len(), opt_metrics.classification_ms);
-
-        // The optimized version should be faster for classification
-        // Note: polygon count may differ until edge walking is fully implemented
+        // Original should produce polygons
+        assert!(
+            !orig_polygons.is_empty(),
+            "Original should produce polygons"
+        );
+        // Optimized classification should run without errors
+        assert!(opt_metrics.classification_ms >= 0.0);
     }
 
     #[test]
     fn test_hybrid_matches_original() {
         // Test that the hybrid version produces identical output to original
-        let values: Vec<f32> = vec![
-            5.0, 5.0, 5.0,
-            5.0, 15.0, 15.0,
-            5.0, 15.0, 15.0,
-        ];
+        let values: Vec<f32> = vec![5.0, 5.0, 5.0, 5.0, 15.0, 15.0, 5.0, 15.0, 15.0];
 
         // Original
-        let (orig_polygons, _) = crate::process_band_flat_with_metrics(&values, 3, 3, 10.0, 20.0, 5);
+        let (orig_polygons, _) =
+            crate::process_band_flat_with_metrics(&values, 3, 3, 10.0, 20.0, 5);
 
         // Hybrid
         let (hybrid_polygons, _) = process_band_optimized_hybrid(&values, 3, 3, 10.0, 20.0, 5);
 
         // Hybrid should produce the same number of polygons
-        assert_eq!(orig_polygons.len(), hybrid_polygons.len(),
-                   "Polygon count mismatch: original {} vs hybrid {}",
-                   orig_polygons.len(), hybrid_polygons.len());
+        assert_eq!(
+            orig_polygons.len(),
+            hybrid_polygons.len(),
+            "Polygon count mismatch: original {} vs hybrid {}",
+            orig_polygons.len(),
+            hybrid_polygons.len()
+        );
 
         // Verify same exterior point count
         for i in 0..orig_polygons.len() {
-            assert_eq!(orig_polygons[i].exterior.len(), hybrid_polygons[i].exterior.len(),
-                       "Polygon {} exterior size mismatch", i);
+            assert_eq!(
+                orig_polygons[i].exterior.len(),
+                hybrid_polygons[i].exterior.len(),
+                "Polygon {} exterior size mismatch",
+                i
+            );
         }
     }
 
@@ -1054,21 +1151,18 @@ mod tests {
         // Create a gradient with some high-value regions
         for r in 0..height {
             for c in 0..width {
-                let dist_from_center = (((r as f32 - 5.0).powi(2) + (c as f32 - 5.0).powi(2))).sqrt();
+                let dist_from_center = ((r as f32 - 5.0).powi(2) + (c as f32 - 5.0).powi(2)).sqrt();
                 values.push(20.0 - dist_from_center * 2.0);
             }
         }
 
         // Original
-        let (orig_polygons, orig_metrics) = crate::process_band_flat_with_metrics(&values, width, height, 10.0, 18.0, 5);
+        let (orig_polygons, _) =
+            crate::process_band_flat_with_metrics(&values, width, height, 10.0, 18.0, 5);
 
         // Hybrid
-        let (hybrid_polygons, hybrid_metrics) = process_band_optimized_hybrid(&values, width, height, 10.0, 18.0, 5);
-
-        eprintln!("10x10 grid: Original {} polygons, Hybrid {} polygons",
-                  orig_polygons.len(), hybrid_polygons.len());
-        eprintln!("  Classification: original {:.3}ms vs hybrid {:.3}ms",
-                  orig_metrics.classification_ms, hybrid_metrics.classification_ms);
+        let (hybrid_polygons, _) =
+            process_band_optimized_hybrid(&values, width, height, 10.0, 18.0, 5);
 
         // Same polygon count
         assert_eq!(orig_polygons.len(), hybrid_polygons.len());

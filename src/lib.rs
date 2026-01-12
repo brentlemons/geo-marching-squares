@@ -158,6 +158,8 @@ pub use cell::{Cell, LineSegment};
 pub use edge::{Edge, EdgeType, Move};
 pub use grid_cell::GridCell;
 pub use marching_squares::{
+    // Hierarchy and orientation (used by optimized module)
+    build_polygon_hierarchy,
     do_concurrent,
     do_concurrent_flat,
     do_concurrent_from_cells,
@@ -165,6 +167,7 @@ pub use marching_squares::{
     do_concurrent_lines,
     do_concurrent_lines_from_cells,
     do_concurrent_lines_from_cells_with_precision,
+    orient_polygons,
     process_band,
     // Flat array processing (for Lambda/high-performance use)
     process_band_flat,
@@ -175,9 +178,6 @@ pub use marching_squares::{
     process_line,
     process_line_from_cells,
     process_line_from_cells_with_precision,
-    // Hierarchy and orientation (used by optimized module)
-    build_polygon_hierarchy,
-    orient_polygons,
     ContourMetrics,
     ContourPolygon,
     DEFAULT_PRECISION,
@@ -299,13 +299,9 @@ mod tests {
     #[test]
     fn test_struct_sizes() {
         use std::mem::size_of;
-        eprintln!("=== Struct Sizes ===");
-        eprintln!("GridCell: {} bytes", size_of::<GridCell>());
-        eprintln!("Point: {} bytes", size_of::<Point>());
-        eprintln!("Edge: {} bytes", size_of::<Edge>());
-        eprintln!("Shape: {} bytes", size_of::<Shape>());
-        eprintln!("Option<Shape>: {} bytes", size_of::<Option<Shape>>());
-        eprintln!("HashMap<Point, Edge>: {} bytes (empty)", size_of::<HashMap<Point, Edge>>());
-        eprintln!("Vec<Point>: {} bytes (empty)", size_of::<Vec<Point>>());
+        // Verify key struct sizes haven't grown unexpectedly
+        assert_eq!(size_of::<GridCell>(), 24, "GridCell should be 24 bytes");
+        assert!(size_of::<Point>() <= 72, "Point should be <= 72 bytes");
+        assert!(size_of::<Shape>() <= 600, "Shape should be <= 600 bytes");
     }
 }
