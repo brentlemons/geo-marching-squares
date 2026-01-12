@@ -99,7 +99,7 @@ fn polygon_in_polygon(subject: &[Vec<Position>], container: &[Vec<Position>]) ->
             let two = &container_points[j];
 
             // Ray casting: count edge crossings
-            // Position format: [longitude, latitude] = [x, y]
+            // Position format: [x, y]
             if ((one[1] > subject_point[1]) != (two[1] > subject_point[1]))
                 && (subject_point[0]
                     < (two[0] - one[0]) * (subject_point[1] - one[1]) / (two[1] - one[1])
@@ -1419,6 +1419,229 @@ pub fn do_concurrent_lines_from_cells_with_precision(
     }
 }
 
+// =============================================================================
+// Flat Array Processing (for Lambda/high-performance use cases)
+// =============================================================================
+
+/// A polygon with exterior ring and optional holes, using f32 grid-space coordinates.
+///
+/// This is the output format for `process_band_flat()`, designed for efficient
+/// serialization and transmission (e.g., in Lambda responses).
+///
+/// Coordinates are in grid-space:
+/// - x = column index (0 to width-1, with sub-pixel interpolation)
+/// - y = row index (0 to height-1, with sub-pixel interpolation)
+///
+/// Winding order follows RFC 7946:
+/// - Exterior ring: counter-clockwise (CCW)
+/// - Holes: clockwise (CW)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ContourPolygon {
+    /// Exterior ring (CCW winding in grid space)
+    pub exterior: Vec<[f32; 2]>,
+
+    /// Interior rings / holes (CW winding in grid space)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holes: Vec<Vec<[f32; 2]>>,
+}
+
+/// Process a single isoband from a flat f32 array
+///
+/// Returns polygons in grid-space coordinates (f32).
+/// Coordinates represent positions in the grid where:
+/// - x = column index (0 to width-1, with sub-pixel interpolation)
+/// - y = row index (0 to height-1, with sub-pixel interpolation)
+///
+/// # Arguments
+///
+/// * `values` - Flat row-major array of grid values (f32, e.g., from Zarr)
+/// * `width` - Number of columns in the grid
+/// * `height` - Number of rows in the grid
+/// * `lower` - Lower threshold (inclusive)
+/// * `upper` - Upper threshold (exclusive)
+/// * `precision` - Decimal places for coordinate rounding (default 5)
+///
+/// # Returns
+///
+/// Vector of polygons, each with exterior ring and optional holes.
+/// Winding order follows RFC 7946 (exterior CCW, holes CW).
+///
+/// # Panics
+///
+/// Panics if `values.len() != width * height`
+///
+/// # Example
+///
+/// ```rust
+/// use geo_marching_squares::process_band_flat;
+///
+/// // 3x3 grid with a high-value region in the bottom-right
+/// let values: Vec<f32> = vec![
+///     5.0, 5.0, 5.0,
+///     5.0, 15.0, 15.0,
+///     5.0, 15.0, 15.0,
+/// ];
+///
+/// let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 5);
+/// // Returns contour polygon(s) for values in [10, 20)
+/// ```
+pub fn process_band_flat(
+    values: &[f32],
+    width: usize,
+    height: usize,
+    lower: f32,
+    upper: f32,
+    precision: u32,
+) -> Vec<ContourPolygon> {
+    assert_eq!(
+        values.len(),
+        width * height,
+        "Grid size mismatch: expected {}x{}={}, got {}",
+        width,
+        height,
+        width * height,
+        values.len()
+    );
+
+    let rows = height;
+    let cols = width;
+
+    // Build a 2D GridCell array with grid indices as coordinates
+    // Row 0 = top of grid, y increases downward
+    let grid: Vec<Vec<crate::GridCell>> = (0..rows)
+        .map(|r| {
+            (0..cols)
+                .map(|c| {
+                    let idx = r * cols + c;
+                    crate::GridCell {
+                        x: c as f64,
+                        y: r as f64,
+                        value: values[idx] as f64,
+                    }
+                })
+                .collect()
+        })
+        .collect();
+
+    // Use existing process_band_from_cells_with_precision to generate GeoJSON
+    let feature = process_band_from_cells_with_precision(
+        &grid,
+        lower as f64,
+        upper as f64,
+        precision,
+    );
+
+    // Convert GeoJSON MultiPolygon to ContourPolygon format with f32 coords
+    convert_feature_to_contour_polygons(feature, precision)
+}
+
+/// Convert a GeoJSON Feature with MultiPolygon geometry to ContourPolygon format
+fn convert_feature_to_contour_polygons(feature: Feature, precision: u32) -> Vec<ContourPolygon> {
+    let geometry = match feature.geometry {
+        Some(g) => g,
+        None => return vec![],
+    };
+
+    let multi_polygon = match geometry.value {
+        GeoValue::MultiPolygon(mp) => mp,
+        _ => return vec![],
+    };
+
+    let factor = 10_f32.powi(precision as i32);
+
+    multi_polygon
+        .into_iter()
+        .map(|polygon_rings| {
+            let exterior = polygon_rings
+                .get(0)
+                .map(|ring| {
+                    ring.iter()
+                        .map(|pos| {
+                            [
+                                (pos[0] as f32 * factor).round() / factor,
+                                (pos[1] as f32 * factor).round() / factor,
+                            ]
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let holes: Vec<Vec<[f32; 2]>> = polygon_rings
+                .iter()
+                .skip(1)
+                .map(|ring| {
+                    ring.iter()
+                        .map(|pos| {
+                            [
+                                (pos[0] as f32 * factor).round() / factor,
+                                (pos[1] as f32 * factor).round() / factor,
+                            ]
+                        })
+                        .collect()
+                })
+                .collect();
+
+            ContourPolygon { exterior, holes }
+        })
+        .collect()
+}
+
+/// Process multiple isoband levels from a flat f32 array in parallel
+///
+/// This is the parallel version of `process_band_flat()`, processing all bands
+/// concurrently using Rayon's work-stealing thread pool.
+///
+/// # Arguments
+///
+/// * `values` - Flat row-major array of grid values (f32)
+/// * `width` - Number of columns in the grid
+/// * `height` - Number of rows in the grid
+/// * `thresholds` - Array of threshold values (N thresholds = N-1 bands)
+/// * `precision` - Decimal places for coordinate rounding
+///
+/// # Returns
+///
+/// Vector of (lower, upper, polygons) tuples, one per band.
+/// Empty bands (no polygons) are filtered out.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::do_concurrent_flat;
+///
+/// let values: Vec<f32> = load_zarr_data();
+/// let thresholds = vec![0.0, 10.0, 20.0, 30.0];
+///
+/// // Process 3 bands in parallel: 0-10, 10-20, 20-30
+/// let results = do_concurrent_flat(&values, 1799, 1059, &thresholds, 5);
+/// ```
+pub fn do_concurrent_flat(
+    values: &[f32],
+    width: usize,
+    height: usize,
+    thresholds: &[f32],
+    precision: u32,
+) -> Vec<(f32, f32, Vec<ContourPolygon>)> {
+    use rayon::prelude::*;
+
+    if thresholds.len() < 2 {
+        return vec![];
+    }
+
+    // Generate band intervals from thresholds
+    let bands: Vec<(f32, f32)> = thresholds.windows(2).map(|w| (w[0], w[1])).collect();
+
+    // Process all bands in parallel
+    bands
+        .into_par_iter()
+        .map(|(lower, upper)| {
+            let polygons = process_band_flat(values, width, height, lower, upper, precision);
+            (lower, upper, polygons)
+        })
+        .filter(|(_, _, polygons)| !polygons.is_empty())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1565,5 +1788,185 @@ mod tests {
         // Should be unchanged
         assert_eq!(oriented[0][0], original_exterior);
         assert_eq!(oriented[0][1], original_hole);
+    }
+
+    // =========================================================================
+    // Tests for flat array processing (process_band_flat, do_concurrent_flat)
+    // =========================================================================
+
+    #[test]
+    fn test_process_band_flat_simple() {
+        // 3x3 grid with a high-value region in the bottom-right
+        // Grid layout (values):
+        //   5   5   5
+        //   5  15  15
+        //   5  15  15
+        let values: Vec<f32> = vec![
+            5.0, 5.0, 5.0,
+            5.0, 15.0, 15.0,
+            5.0, 15.0, 15.0,
+        ];
+
+        let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 5);
+
+        // Should produce at least one polygon for the 10-20 band
+        assert!(!polygons.is_empty(), "Should have at least one polygon");
+
+        // Check that exterior ring has points
+        assert!(!polygons[0].exterior.is_empty(), "Exterior ring should have points");
+    }
+
+    #[test]
+    fn test_process_band_flat_empty_result() {
+        // All values below threshold
+        let values: Vec<f32> = vec![
+            5.0, 5.0, 5.0,
+            5.0, 5.0, 5.0,
+            5.0, 5.0, 5.0,
+        ];
+
+        let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 5);
+
+        // Should produce no polygons when all values are below threshold
+        assert!(polygons.is_empty(), "Should have no polygons for uniform grid below threshold");
+    }
+
+    #[test]
+    fn test_process_band_flat_all_above() {
+        // All values above threshold
+        let values: Vec<f32> = vec![
+            25.0, 25.0, 25.0,
+            25.0, 25.0, 25.0,
+            25.0, 25.0, 25.0,
+        ];
+
+        let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 5);
+
+        // Should produce no polygons when all values are above threshold
+        assert!(polygons.is_empty(), "Should have no polygons for uniform grid above threshold");
+    }
+
+    #[test]
+    fn test_process_band_flat_grid_coords() {
+        // 3x3 grid with values that create a contour
+        let values: Vec<f32> = vec![
+            5.0, 5.0, 5.0,
+            5.0, 15.0, 15.0,
+            5.0, 15.0, 15.0,
+        ];
+
+        let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 5);
+
+        assert!(!polygons.is_empty());
+
+        // Verify coordinates are in grid space (0-2 range for a 3x3 grid)
+        for poly in &polygons {
+            for point in &poly.exterior {
+                assert!(point[0] >= 0.0 && point[0] <= 2.0,
+                    "X coordinate {} should be in grid range [0, 2]", point[0]);
+                assert!(point[1] >= 0.0 && point[1] <= 2.0,
+                    "Y coordinate {} should be in grid range [0, 2]", point[1]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_process_band_flat_f32_precision() {
+        // Verify f32 coordinates maintain precision
+        let values: Vec<f32> = vec![
+            5.0, 5.0, 5.0,
+            5.0, 15.0, 15.0,
+            5.0, 15.0, 15.0,
+        ];
+
+        let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 3);
+
+        assert!(!polygons.is_empty());
+
+        // Check that coordinates are rounded to 3 decimal places
+        for poly in &polygons {
+            for point in &poly.exterior {
+                // Multiply by 1000, round, check if it's close to an integer
+                let x_scaled = point[0] * 1000.0;
+                let y_scaled = point[1] * 1000.0;
+                assert!((x_scaled - x_scaled.round()).abs() < 0.001,
+                    "X coordinate should be rounded to 3 decimal places");
+                assert!((y_scaled - y_scaled.round()).abs() < 0.001,
+                    "Y coordinate should be rounded to 3 decimal places");
+            }
+        }
+    }
+
+    #[test]
+    fn test_do_concurrent_flat_multiple_bands() {
+        // 5x5 grid with gradient values
+        let mut values: Vec<f32> = Vec::with_capacity(25);
+        for r in 0..5 {
+            for c in 0..5 {
+                values.push((r * 5 + c) as f32 * 2.0); // Values from 0 to 48
+            }
+        }
+
+        let thresholds = vec![0.0, 10.0, 20.0, 30.0, 40.0];
+        let results = do_concurrent_flat(&values, 5, 5, &thresholds, 5);
+
+        // Should have at least some bands with polygons
+        assert!(!results.is_empty(), "Should have at least one band with polygons");
+
+        // Each result should have valid lower/upper thresholds
+        for (lower, upper, polygons) in &results {
+            assert!(lower < upper, "Lower should be less than upper");
+            assert!(!polygons.is_empty(), "Each returned band should have polygons");
+        }
+    }
+
+    #[test]
+    fn test_do_concurrent_flat_filters_empty() {
+        // Uniform grid - no bands will have polygons
+        let values: Vec<f32> = vec![5.0; 25]; // 5x5 grid of 5.0
+
+        let thresholds = vec![10.0, 20.0, 30.0];
+        let results = do_concurrent_flat(&values, 5, 5, &thresholds, 5);
+
+        // All bands should be filtered out (values are all below thresholds)
+        assert!(results.is_empty(), "Should filter out empty bands");
+    }
+
+    #[test]
+    fn test_contour_polygon_serde() {
+        let polygon = ContourPolygon {
+            exterior: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]],
+            holes: vec![vec![[0.2, 0.2], [0.2, 0.8], [0.8, 0.8], [0.8, 0.2], [0.2, 0.2]]],
+        };
+
+        // Serialize to JSON
+        let json = serde_json::to_string(&polygon).unwrap();
+
+        // Deserialize back
+        let deserialized: ContourPolygon = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(polygon.exterior.len(), deserialized.exterior.len());
+        assert_eq!(polygon.holes.len(), deserialized.holes.len());
+    }
+
+    #[test]
+    fn test_contour_polygon_empty_holes_skipped() {
+        let polygon = ContourPolygon {
+            exterior: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]],
+            holes: vec![], // Empty holes
+        };
+
+        // Serialize to JSON
+        let json = serde_json::to_string(&polygon).unwrap();
+
+        // Empty holes should be skipped in serialization
+        assert!(!json.contains("holes"), "Empty holes should be skipped: {}", json);
+    }
+
+    #[test]
+    #[should_panic(expected = "Grid size mismatch")]
+    fn test_process_band_flat_size_mismatch() {
+        let values: Vec<f32> = vec![5.0; 10]; // 10 values
+        process_band_flat(&values, 3, 3, 10.0, 20.0, 5); // Expects 9 values
     }
 }

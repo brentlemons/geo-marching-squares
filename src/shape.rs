@@ -26,7 +26,7 @@ pub struct Shape {
     /// The geometric type of this shape
     shape_type: ShapeType,
 
-    /// Corner points (geographic coordinates)
+    /// Corner points
     top_left: Point,
     top_right: Point,
     bottom_right: Point,
@@ -225,10 +225,10 @@ impl Shape {
         let bl = bottom_left.value;
 
         // Create corner points
-        let top_left_pt = Point::new(top_left.lon, top_left.lat);
-        let top_right_pt = Point::new(top_right.lon, top_right.lat);
-        let bottom_right_pt = Point::new(bottom_right.lon, bottom_right.lat);
-        let bottom_left_pt = Point::new(bottom_left.lon, bottom_left.lat);
+        let top_left_pt = Point::new(top_left.x, top_left.y);
+        let top_right_pt = Point::new(top_right.x, top_right.y);
+        let bottom_right_pt = Point::new(bottom_right.x, bottom_right.y);
+        let bottom_left_pt = Point::new(bottom_left.x, bottom_left.y);
 
         // Compute ternary classification value using bitwise encoding
         let mut value = 0u8;

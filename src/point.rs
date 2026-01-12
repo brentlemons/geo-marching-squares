@@ -12,7 +12,7 @@ pub enum Side {
 /// A point in 2D space, either with actual coordinates or as a placeholder for interpolation
 ///
 /// Points can represent two different concepts:
-/// 1. Actual geographic coordinates (x, y populated)
+/// 1. Actual coordinates (x, y populated)
 /// 2. Markers for interpolation (value, limit, side populated)
 #[derive(Debug, Clone)]
 pub struct Point {
@@ -49,12 +49,12 @@ impl Point {
         }
     }
 
-    /// Get x coordinate (longitude)
+    /// Get x coordinate
     pub fn x(&self) -> Option<f64> {
         self.x
     }
 
-    /// Get y coordinate (latitude)
+    /// Get y coordinate
     pub fn y(&self) -> Option<f64> {
         self.y
     }

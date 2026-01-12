@@ -9,11 +9,11 @@ fn create_test_grid() -> Vec<Vec<GridCell>> {
     for row in 0..4 {
         let mut row_vec = Vec::new();
         for col in 0..4 {
-            let lon = -122.0 + (col as f64 * 0.1);
-            let lat = 37.0 + (row as f64 * 0.1);
+            let x = col as f64 * 0.1;
+            let y = row as f64 * 0.1;
             let value = (row * 4 + col) as f64;
 
-            row_vec.push(GridCell { lon, lat, value });
+            row_vec.push(GridCell { x, y, value });
         }
         grid.push(row_vec);
     }
@@ -66,7 +66,7 @@ fn test_grid_cell_memory_size() {
 
 #[test]
 fn test_grid_cell_large_grid_simulation() {
-    // Simulate HRRR-scale grid dimensions (smaller for test speed)
+    // Simulate large grid dimensions (smaller for test speed)
     let rows = 100;
     let cols = 100;
 
@@ -74,11 +74,11 @@ fn test_grid_cell_large_grid_simulation() {
     for row in 0..rows {
         let mut row_vec = Vec::with_capacity(cols);
         for col in 0..cols {
-            let lon = -122.0 + (col as f64 * 0.01);
-            let lat = 37.0 + (row as f64 * 0.01);
+            let x = col as f64 * 0.01;
+            let y = row as f64 * 0.01;
             let value = ((row + col) as f64).sin() * 10.0 + 15.0;
 
-            row_vec.push(GridCell { lon, lat, value });
+            row_vec.push(GridCell { x, y, value });
         }
         grid.push(row_vec);
     }
@@ -96,7 +96,7 @@ fn test_grid_cell_coordinates_preserved() {
 
     let result = do_concurrent_from_cells(&grid, &thresholds);
 
-    // Verify that generated coordinates are within expected lon/lat bounds
+    // Verify that generated coordinates are within expected bounds
     for feature in &result.features {
         if let Some(geojson::Geometry {
             value: geojson::Value::MultiPolygon(polygons),
@@ -106,10 +106,10 @@ fn test_grid_cell_coordinates_preserved() {
             for polygon in polygons {
                 for ring in polygon {
                     for coord in ring {
-                        // Longitude should be between -122.0 and -121.7
-                        assert!(coord[0] >= -122.1 && coord[0] <= -121.6);
-                        // Latitude should be between 37.0 and 37.3
-                        assert!(coord[1] >= 36.9 && coord[1] <= 37.4);
+                        // X should be between 0.0 and 0.3
+                        assert!(coord[0] >= -0.1 && coord[0] <= 0.4);
+                        // Y should be between 0.0 and 0.3
+                        assert!(coord[1] >= -0.1 && coord[1] <= 0.4);
                     }
                 }
             }
@@ -133,15 +133,15 @@ fn test_grid_cell_vs_feature_compatibility() {
         let mut row_features = Vec::new();
 
         for col in 0..grid_size {
-            let lon = -122.0 + (col as f64 * 0.1);
-            let lat = 37.0 + (row as f64 * 0.1);
+            let x = col as f64 * 0.1;
+            let y = row as f64 * 0.1;
             let value = (row + col) as f64;
 
             // GridCell version
-            row_cells.push(GridCell { lon, lat, value });
+            row_cells.push(GridCell { x, y, value });
 
             // Feature version
-            let geometry = Geometry::new(Value::Point(vec![lon, lat]));
+            let geometry = Geometry::new(Value::Point(vec![x, y]));
             let mut properties = JsonObject::new();
             properties.insert("value".to_string(), serde_json::json!(value));
 

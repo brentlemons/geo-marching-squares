@@ -1,25 +1,57 @@
 //! # geo-marching-squares
 //!
 //! A Rust implementation of the marching squares algorithm for generating contour polygons
-//! from geospatial data.
+//! from 2D scalar fields.
 //!
 //! This library generates **isobands** (filled contour polygons) and **isolines** (contour lines)
-//! from 2D scalar fields using geographic coordinates (latitude/longitude).
+//! from 2D scalar fields. Coordinates can be geographic (lon/lat) or any Cartesian system.
 //!
 //! ## Input Formats
 //!
-//! The library supports two input formats:
+//! The library supports three input formats:
 //!
-//! 1. **GridCell** (Recommended for large grids): Lightweight 24-byte structs
+//! 1. **Flat f32 array** (Best for Lambda/Zarr): Most memory-efficient
+//!    - Memory usage: ~7.3 MB for 1799×1059 HRRR grid (4 bytes/value)
+//!    - Outputs grid-space coordinates (f32) for efficient serialization
+//!    - Ideal for serverless, Zarr integration, and microservices
+//!    - Use `process_band_flat()` and `do_concurrent_flat()`
+//!
+//! 2. **GridCell** (Recommended for large grids): Lightweight 24-byte structs
 //!    - Memory usage: ~46 MB for 1799×1059 HRRR grid
 //!    - **12x more memory-efficient** than GeoJSON Features
 //!    - Best for meteorological/oceanographic applications
 //!
-//! 2. **GeoJSON Features**: Full-featured with metadata support
+//! 3. **GeoJSON Features**: Full-featured with metadata support
 //!    - Memory usage: ~380-570 MB for 1799×1059 grid
 //!    - Better for small grids or when metadata is needed
 //!
 //! ## Examples
+//!
+//! ### Flat Array Processing (Best for Lambda/Serverless)
+//!
+//! Process contours from a flat f32 array (e.g., from Zarr) with grid-space output:
+//!
+//! ```rust,ignore
+//! use geo_marching_squares::{process_band_flat, do_concurrent_flat, ContourPolygon};
+//!
+//! // Flat row-major array of grid values (e.g., from Zarr)
+//! let values: Vec<f32> = fetch_zarr_data();
+//! let width = 1799;
+//! let height = 1059;
+//!
+//! // Single band processing
+//! let polygons: Vec<ContourPolygon> = process_band_flat(&values, width, height, 10.0, 20.0, 5);
+//!
+//! // Concurrent processing of multiple bands
+//! let thresholds = vec![0.0, 10.0, 20.0, 30.0];
+//! let results = do_concurrent_flat(&values, width, height, &thresholds, 5);
+//!
+//! // Results are (lower, upper, Vec<ContourPolygon>) tuples
+//! // ContourPolygon uses f32 grid-space coordinates for efficient serialization
+//! for (lower, upper, polygons) in results {
+//!     println!("Band [{}, {}): {} polygons", lower, upper, polygons.len());
+//! }
+//! ```
 //!
 //! ### Concurrent Processing with GridCell (Recommended for Large Grids)
 //!
@@ -133,6 +165,8 @@ pub use marching_squares::{
     process_band_from_cells_with_precision, do_concurrent_from_cells_with_precision,
     process_line_from_cells_with_precision, do_concurrent_lines_from_cells_with_precision,
     DEFAULT_PRECISION,
+    // Flat array processing (for Lambda/high-performance use)
+    process_band_flat, do_concurrent_flat, ContourPolygon,
 };
 pub use grid_cell::GridCell;
 

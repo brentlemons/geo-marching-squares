@@ -75,10 +75,10 @@ fn test_process_band_simple_3x3_grid() {
 
                 // Verify coordinates are rounded to 5 decimal places
                 for point in &polygon[0] {
-                    let rounded_lon = (point[0] * 100000.0).round() / 100000.0;
-                    let rounded_lat = (point[1] * 100000.0).round() / 100000.0;
-                    assert_eq!(point[0], rounded_lon, "Longitude should be rounded");
-                    assert_eq!(point[1], rounded_lat, "Latitude should be rounded");
+                    let rounded_x = (point[0] * 100000.0).round() / 100000.0;
+                    let rounded_y = (point[1] * 100000.0).round() / 100000.0;
+                    assert_eq!(point[0], rounded_x, "X coordinate should be rounded");
+                    assert_eq!(point[1], rounded_y, "Y coordinate should be rounded");
                 }
             }
         }

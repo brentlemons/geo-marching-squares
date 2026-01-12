@@ -18,7 +18,7 @@ pub struct LineSegment {
 /// This results in 16 possible configurations instead of 81.
 #[derive(Debug, Clone)]
 pub struct Cell {
-    /// Corner points (geographic coordinates)
+    /// Corner points
     top_left: Point,
     top_right: Point,
     bottom_right: Point,
@@ -220,10 +220,10 @@ impl Cell {
 
         // Create cell
         let mut cell = Self::new(
-            Point::new(top_left.lon, top_left.lat),
-            Point::new(top_right.lon, top_right.lat),
-            Point::new(bottom_right.lon, bottom_right.lat),
-            Point::new(bottom_left.lon, bottom_left.lat),
+            Point::new(top_left.x, top_left.y),
+            Point::new(top_right.x, top_right.y),
+            Point::new(bottom_right.x, bottom_right.y),
+            Point::new(bottom_left.x, bottom_left.y),
             isovalue,
             tl_val,
             tr_val,
