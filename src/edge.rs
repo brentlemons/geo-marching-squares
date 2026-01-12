@@ -10,10 +10,10 @@ pub enum EdgeType {
 /// Direction to move to the next cell when following this edge
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Move {
-    Right,  // column++
-    Down,   // row++
-    Left,   // column--
-    Up,     // row--
+    Right, // column++
+    Down,  // row++
+    Left,  // column--
+    Up,    // row--
     Unknown,
 }
 

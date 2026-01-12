@@ -145,30 +145,41 @@
 //! - **Zero-copy**: Input grid shared across all threads (read-only)
 //! - **Efficient**: Rust's zero-cost abstractions ensure optimal performance
 
-mod point;
-mod edge;
-mod shape;
 mod cell;
+mod edge;
+mod grid_cell;
 mod isoline_assembler;
 mod marching_squares;
-mod grid_cell;
+mod point;
+mod shape;
 
-pub use point::{Point, Side};
-pub use edge::{Edge, EdgeType, Move};
-pub use shape::{Shape, ShapeType};
 pub use cell::{Cell, LineSegment};
-pub use marching_squares::{
-    process_band, do_concurrent, process_line, do_concurrent_lines,
-    process_band_from_cells, do_concurrent_from_cells,
-    process_line_from_cells, do_concurrent_lines_from_cells,
-    // Precision-aware variants
-    process_band_from_cells_with_precision, do_concurrent_from_cells_with_precision,
-    process_line_from_cells_with_precision, do_concurrent_lines_from_cells_with_precision,
-    DEFAULT_PRECISION,
-    // Flat array processing (for Lambda/high-performance use)
-    process_band_flat, do_concurrent_flat, ContourPolygon,
-};
+pub use edge::{Edge, EdgeType, Move};
 pub use grid_cell::GridCell;
+pub use marching_squares::{
+    do_concurrent,
+    do_concurrent_flat,
+    do_concurrent_from_cells,
+    do_concurrent_from_cells_with_precision,
+    do_concurrent_lines,
+    do_concurrent_lines_from_cells,
+    do_concurrent_lines_from_cells_with_precision,
+    process_band,
+    // Flat array processing (for Lambda/high-performance use)
+    process_band_flat,
+    process_band_flat_with_metrics,
+    process_band_from_cells,
+    // Precision-aware variants
+    process_band_from_cells_with_precision,
+    process_line,
+    process_line_from_cells,
+    process_line_from_cells_with_precision,
+    ContourMetrics,
+    ContourPolygon,
+    DEFAULT_PRECISION,
+};
+pub use point::{Point, Side};
+pub use shape::{Shape, ShapeType};
 
 #[cfg(test)]
 mod tests {
@@ -227,8 +238,14 @@ mod tests {
             20.0, // upper
             0,    // x
             0,    // y
-            true, false, false, false, // edges
-            5.0, 15.0, 5.0, 15.0, // corner values
+            true,
+            false,
+            false,
+            false, // edges
+            5.0,
+            15.0,
+            5.0,
+            15.0, // corner values
         );
 
         assert_eq!(shape.shape_type(), ShapeType::Triangle);
@@ -268,13 +285,7 @@ mod tests {
     #[test]
     fn test_move_directions() {
         // Ensure all move directions exist
-        let moves = vec![
-            Move::Right,
-            Move::Down,
-            Move::Left,
-            Move::Up,
-            Move::Unknown,
-        ];
+        let moves = vec![Move::Right, Move::Down, Move::Left, Move::Up, Move::Unknown];
 
         assert_eq!(moves.len(), 5);
     }

@@ -58,7 +58,12 @@ impl BBox {
             max_y = max_y.max(point[1]);
         }
 
-        Self { min_x, max_x, min_y, max_y }
+        Self {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+        }
     }
 
     /// Check if this bbox is completely inside another bbox
@@ -102,8 +107,7 @@ fn polygon_in_polygon(subject: &[Vec<Position>], container: &[Vec<Position>]) ->
             // Position format: [x, y]
             if ((one[1] > subject_point[1]) != (two[1] > subject_point[1]))
                 && (subject_point[0]
-                    < (two[0] - one[0]) * (subject_point[1] - one[1]) / (two[1] - one[1])
-                        + one[0])
+                    < (two[0] - one[0]) * (subject_point[1] - one[1]) / (two[1] - one[1]) + one[0])
             {
                 inside = !inside;
             }
@@ -272,8 +276,13 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
     }
 
     let edge_walking_elapsed = edge_walking_start.elapsed();
-    eprintln!("[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} shapes, {} total edges, {} polygons)",
-        edge_walking_elapsed, cells_with_shapes, total_edges_found, hold_polygons.len());
+    eprintln!(
+        "[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} shapes, {} total edges, {} polygons)",
+        edge_walking_elapsed,
+        cells_with_shapes,
+        total_edges_found,
+        hold_polygons.len()
+    );
 
     // Resolve polygon nesting (exterior vs interior rings) with spatial optimization
     let nesting_start = std::time::Instant::now();
@@ -302,7 +311,9 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
                 // Check if subject is in a hole (should be pushed out)
                 for hole in polygon.iter().skip(1) {
                     let hole_bbox = BBox::from_ring(hole);
-                    if subject_bbox.is_inside(&hole_bbox) && polygon_in_polygon(&subject, std::slice::from_ref(hole)) {
+                    if subject_bbox.is_inside(&hole_bbox)
+                        && polygon_in_polygon(&subject, std::slice::from_ref(hole))
+                    {
                         push_out = true;
                         break;
                     }
@@ -321,7 +332,8 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
             }
             // Case 2: polygon is inside subject
             // Only test if bbox could contain polygon
-            else if polygon_bbox.is_inside(&subject_bbox) && polygon_in_polygon(polygon, &subject) {
+            else if polygon_bbox.is_inside(&subject_bbox) && polygon_in_polygon(polygon, &subject)
+            {
                 // Break apart polygon and reprocess
                 if polygon.len() > 1 {
                     // Has interior rings - push them back for reprocessing
@@ -345,8 +357,11 @@ pub fn process_band(data: &[Vec<Feature>], lower: f64, upper: f64) -> Feature {
         }
     }
     let nesting_elapsed = nesting_start.elapsed();
-    eprintln!("[geo-marching-squares] ⏱️  Polygon Nesting Resolution: {:?} ({} final polygons)",
-        nesting_elapsed, polygons.len());
+    eprintln!(
+        "[geo-marching-squares] ⏱️  Polygon Nesting Resolution: {:?} ({} final polygons)",
+        nesting_elapsed,
+        polygons.len()
+    );
 
     // Orient polygons to follow RFC 7946 right-hand rule
     let oriented_polygons = orient_polygons(polygons);
@@ -502,8 +517,13 @@ fn walk_polygon_recursive_with_precision(
         "unknown"
     };
 
-    eprintln!("[geo-marching-squares] Polygon at ({}, {}) winding: {}, edges: {}",
-        start_r, start_c, winding, exterior_ring.len());
+    eprintln!(
+        "[geo-marching-squares] Polygon at ({}, {}) winding: {}, edges: {}",
+        start_r,
+        start_c,
+        winding,
+        exterior_ring.len()
+    );
 
     // Return just the exterior ring - containment will be determined in post-processing
     // No more flood fill or recursive hole processing
@@ -586,7 +606,9 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
 
                 pip_checks += 1;
                 // Point-in-polygon check - test first point of hole against container
-                if metas[i].ring.len() > 0 && polygon_contains_point(&metas[j].ring, &metas[i].ring[0]) {
+                if metas[i].ring.len() > 0
+                    && polygon_contains_point(&metas[j].ring, &metas[i].ring[0])
+                {
                     // Found a container! Early exit instead of finding smallest
                     container = Some(j);
                     break;
@@ -623,7 +645,9 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
                 }
 
                 island_pip_checks += 1;
-                if metas[i].ring.len() > 0 && polygon_contains_point(&metas[j].ring, &metas[i].ring[0]) {
+                if metas[i].ring.len() > 0
+                    && polygon_contains_point(&metas[j].ring, &metas[i].ring[0])
+                {
                     cw_containers[i] = Some(j);
                     break; // Found container
                 }
@@ -684,9 +708,15 @@ fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec
     let assembly_elapsed = assembly_start.elapsed();
     let hierarchy_total = hierarchy_start.elapsed();
 
-    eprintln!("[geo-marching-squares]   ⏱️  Polygon Assembly: {:?} ({} output polygons)",
-        assembly_elapsed, result.len());
-    eprintln!("[geo-marching-squares]   ⏱️  TOTAL HIERARCHY: {:?}", hierarchy_total);
+    eprintln!(
+        "[geo-marching-squares]   ⏱️  Polygon Assembly: {:?} ({} output polygons)",
+        assembly_elapsed,
+        result.len()
+    );
+    eprintln!(
+        "[geo-marching-squares]   ⏱️  TOTAL HIERARCHY: {:?}",
+        hierarchy_total
+    );
 
     result
 }
@@ -850,8 +880,10 @@ pub fn process_band_from_cells_with_precision(
     let rows = data.len();
     let cols = data[0].len();
 
-    eprintln!("[geo-marching-squares] process_band_from_cells: Starting band [{}, {}) on {}x{} grid",
-        lower, upper, rows, cols);
+    eprintln!(
+        "[geo-marching-squares] process_band_from_cells: Starting band [{}, {}) on {}x{} grid",
+        lower, upper, rows, cols
+    );
 
     // Create cells from grid (rows-1 × cols-1)
     let mut cells: Vec<Vec<Option<Shape>>> = Vec::with_capacity(rows - 1);
@@ -860,7 +892,10 @@ pub fn process_band_from_cells_with_precision(
     }
 
     let classification_start = std::time::Instant::now();
-    eprintln!("[geo-marching-squares] process_band_from_cells: Creating {} cells", (rows - 1) * (cols - 1));
+    eprintln!(
+        "[geo-marching-squares] process_band_from_cells: Creating {} cells",
+        (rows - 1) * (cols - 1)
+    );
     for r in 0..rows - 1 {
         for c in 0..cols - 1 {
             cells[r][c] = Shape::create_from_cells(
@@ -884,7 +919,10 @@ pub fn process_band_from_cells_with_precision(
     let cell_rows = cells.len();
     let cell_cols = cells[0].len();
 
-    eprintln!("[geo-marching-squares] ⏱️  Shape Classification: {:?}", classification_elapsed);
+    eprintln!(
+        "[geo-marching-squares] ⏱️  Shape Classification: {:?}",
+        classification_elapsed
+    );
     eprintln!("[geo-marching-squares] process_band_from_cells: Cells created, now walking edges");
 
     // Recursive polygon walking with automatic hole detection
@@ -901,7 +939,16 @@ pub fn process_band_from_cells_with_precision(
                 if let Some(cell) = &cells[r][c] {
                     if !cell.is_cleared() {
                         // Found an unprocessed polygon - recursively walk it and its holes
-                        let polygon = walk_polygon_recursive_with_precision(&mut cells, data, lower, upper, r, c, &mut processed, precision);
+                        let polygon = walk_polygon_recursive_with_precision(
+                            &mut cells,
+                            data,
+                            lower,
+                            upper,
+                            r,
+                            c,
+                            &mut processed,
+                            precision,
+                        );
                         if !polygon.is_empty() && !polygon[0].is_empty() {
                             polygons.push(polygon);
                         }
@@ -912,21 +959,30 @@ pub fn process_band_from_cells_with_precision(
     }
 
     let recursive_elapsed = recursive_start.elapsed();
-    eprintln!("[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} raw polygons)",
-        recursive_elapsed, polygons.len());
+    eprintln!(
+        "[geo-marching-squares] ⏱️  Edge Walking: {:?} ({} raw polygons)",
+        recursive_elapsed,
+        polygons.len()
+    );
 
     // Build containment hierarchy using winding direction + bbox optimization
     let nesting_start = std::time::Instant::now();
     let hierarchical_polygons = build_polygon_hierarchy(polygons);
     let nesting_elapsed = nesting_start.elapsed();
-    eprintln!("[geo-marching-squares] ⏱️  Polygon Nesting: {:?} ({} final polygons)",
-        nesting_elapsed, hierarchical_polygons.len());
+    eprintln!(
+        "[geo-marching-squares] ⏱️  Polygon Nesting: {:?} ({} final polygons)",
+        nesting_elapsed,
+        hierarchical_polygons.len()
+    );
 
     // Orient polygons to follow RFC 7946 right-hand rule
     let orient_start = std::time::Instant::now();
     let oriented_polygons = orient_polygons(hierarchical_polygons);
     let orient_elapsed = orient_start.elapsed();
-    eprintln!("[geo-marching-squares] ⏱️  Polygon Orientation (RFC 7946): {:?}", orient_elapsed);
+    eprintln!(
+        "[geo-marching-squares] ⏱️  Polygon Orientation (RFC 7946): {:?}",
+        orient_elapsed
+    );
 
     eprintln!("[geo-marching-squares] process_band_from_cells: Polygon processing complete, building feature with {} polygons",
         oriented_polygons.len());
@@ -951,9 +1007,18 @@ pub fn process_band_from_cells_with_precision(
     let geometry_elapsed = geometry_start.elapsed();
     let total_elapsed = band_start.elapsed();
 
-    eprintln!("[geo-marching-squares] ⏱️  Geometry Building: {:?}", geometry_elapsed);
-    eprintln!("[geo-marching-squares] ⏱️  TOTAL BAND TIME: {:?}", total_elapsed);
-    eprintln!("[geo-marching-squares] process_band_from_cells: Feature complete for band [{}, {})", lower, upper);
+    eprintln!(
+        "[geo-marching-squares] ⏱️  Geometry Building: {:?}",
+        geometry_elapsed
+    );
+    eprintln!(
+        "[geo-marching-squares] ⏱️  TOTAL BAND TIME: {:?}",
+        total_elapsed
+    );
+    eprintln!(
+        "[geo-marching-squares] process_band_from_cells: Feature complete for band [{}, {})",
+        lower, upper
+    );
 
     feature
 }
@@ -1001,10 +1066,7 @@ fn has_coordinates(feature: &Feature) -> bool {
 /// let result = do_concurrent(&grid, &thresholds);
 /// assert_eq!(result.features.len(), 3); // assuming all have data
 /// ```
-pub fn do_concurrent(
-    data: &[Vec<Feature>],
-    isobands: &[f64],
-) -> geojson::FeatureCollection {
+pub fn do_concurrent(data: &[Vec<Feature>], isobands: &[f64]) -> geojson::FeatureCollection {
     use rayon::prelude::*;
 
     // Process each isoband pair in parallel
@@ -1087,20 +1149,36 @@ pub fn do_concurrent_from_cells_with_precision(
 
     eprintln!("[geo-marching-squares] do_concurrent_from_cells: Starting with {} thresholds, {} bands to generate (precision={})",
         isobands.len(), isobands.len().saturating_sub(1), precision);
-    eprintln!("[geo-marching-squares] Grid size: {}x{} = {} cells",
+    eprintln!(
+        "[geo-marching-squares] Grid size: {}x{} = {} cells",
         data.len(),
         if data.is_empty() { 0 } else { data[0].len() },
-        data.len() * if data.is_empty() { 0 } else { data[0].len() });
+        data.len() * if data.is_empty() { 0 } else { data[0].len() }
+    );
 
     // Process each isoband pair sequentially (testing performance)
     let features: Vec<Feature> = (0..isobands.len() - 1)
-        .into_iter()  // Changed from into_par_iter() for sequential processing
+        .into_iter() // Changed from into_par_iter() for sequential processing
         .map(|i| {
-            eprintln!("[geo-marching-squares] Band {}/{}: Processing [{}, {})",
-                i + 1, isobands.len() - 1, isobands[i], isobands[i + 1]);
+            eprintln!(
+                "[geo-marching-squares] Band {}/{}: Processing [{}, {})",
+                i + 1,
+                isobands.len() - 1,
+                isobands[i],
+                isobands[i + 1]
+            );
             // Each iteration processes one isoband level
-            let result = process_band_from_cells_with_precision(data, isobands[i], isobands[i + 1], precision);
-            eprintln!("[geo-marching-squares] Band {}/{}: Completed", i + 1, isobands.len() - 1);
+            let result = process_band_from_cells_with_precision(
+                data,
+                isobands[i],
+                isobands[i + 1],
+                precision,
+            );
+            eprintln!(
+                "[geo-marching-squares] Band {}/{}: Completed",
+                i + 1,
+                isobands.len() - 1
+            );
             result
         })
         .filter(|feature| {
@@ -1109,7 +1187,10 @@ pub fn do_concurrent_from_cells_with_precision(
         })
         .collect();
 
-    eprintln!("[geo-marching-squares] do_concurrent_from_cells: Completed, generated {} features", features.len());
+    eprintln!(
+        "[geo-marching-squares] do_concurrent_from_cells: Completed, generated {} features",
+        features.len()
+    );
 
     // Build and return FeatureCollection
     geojson::FeatureCollection {
@@ -1331,10 +1412,7 @@ pub fn process_line_from_cells_with_precision(
 /// // Creates 4 isolines at values 0, 10, 20, and 30
 /// let result = do_concurrent_lines(&grid, &isovalues);
 /// ```
-pub fn do_concurrent_lines(
-    data: &[Vec<Feature>],
-    isovalues: &[f64],
-) -> geojson::FeatureCollection {
+pub fn do_concurrent_lines(data: &[Vec<Feature>], isovalues: &[f64]) -> geojson::FeatureCollection {
     use rayon::prelude::*;
 
     let features: Vec<Feature> = isovalues
@@ -1445,6 +1523,31 @@ pub struct ContourPolygon {
     pub holes: Vec<Vec<[f32; 2]>>,
 }
 
+/// Timing metrics for contour generation phases.
+///
+/// All times are in milliseconds (f64).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ContourMetrics {
+    /// Time to build GridCell array from flat values
+    pub grid_build_ms: f64,
+    /// Time to classify cells into marching squares shapes
+    pub classification_ms: f64,
+    /// Time to walk edges and trace polygon boundaries
+    pub edge_walking_ms: f64,
+    /// Time to determine polygon hierarchy (holes vs exteriors)
+    pub hierarchy_ms: f64,
+    /// Time to orient polygons per RFC 7946
+    pub orientation_ms: f64,
+    /// Time to convert to final ContourPolygon format
+    pub conversion_ms: f64,
+    /// Total time for all phases
+    pub total_ms: f64,
+    /// Number of raw polygons before hierarchy resolution
+    pub raw_polygon_count: usize,
+    /// Number of final polygons after hierarchy resolution
+    pub final_polygon_count: usize,
+}
+
 /// Process a single isoband from a flat f32 array
 ///
 /// Returns polygons in grid-space coordinates (f32).
@@ -1524,12 +1627,8 @@ pub fn process_band_flat(
         .collect();
 
     // Use existing process_band_from_cells_with_precision to generate GeoJSON
-    let feature = process_band_from_cells_with_precision(
-        &grid,
-        lower as f64,
-        upper as f64,
-        precision,
-    );
+    let feature =
+        process_band_from_cells_with_precision(&grid, lower as f64, upper as f64, precision);
 
     // Convert GeoJSON MultiPolygon to ContourPolygon format with f32 coords
     convert_feature_to_contour_polygons(feature, precision)
@@ -1584,6 +1683,184 @@ fn convert_feature_to_contour_polygons(feature: Feature, precision: u32) -> Vec<
             ContourPolygon { exterior, holes }
         })
         .collect()
+}
+
+/// Process a single isoband from a flat f32 array, returning detailed timing metrics.
+///
+/// This is the metrics-enabled version of `process_band_flat()`. Use this when you
+/// need detailed performance data for each phase of contour generation.
+///
+/// # Arguments
+///
+/// * `values` - Flat row-major array of grid values (f32, e.g., from Zarr)
+/// * `width` - Number of columns in the grid
+/// * `height` - Number of rows in the grid
+/// * `lower` - Lower threshold (inclusive)
+/// * `upper` - Upper threshold (exclusive)
+/// * `precision` - Decimal places for coordinate rounding (default 5)
+///
+/// # Returns
+///
+/// A tuple of (polygons, metrics) where:
+/// - `polygons`: Vector of polygons with exterior ring and optional holes
+/// - `metrics`: Timing data for each processing phase
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::process_band_flat_with_metrics;
+///
+/// let values: Vec<f32> = fetch_zarr_data();
+/// let (polygons, metrics) = process_band_flat_with_metrics(&values, 1799, 1059, 10.0, 20.0, 5);
+///
+/// println!("Generated {} polygons", polygons.len());
+/// println!("Classification: {:.2}ms", metrics.classification_ms);
+/// println!("Edge walking: {:.2}ms", metrics.edge_walking_ms);
+/// println!("Hierarchy: {:.2}ms", metrics.hierarchy_ms);
+/// ```
+pub fn process_band_flat_with_metrics(
+    values: &[f32],
+    width: usize,
+    height: usize,
+    lower: f32,
+    upper: f32,
+    precision: u32,
+) -> (Vec<ContourPolygon>, ContourMetrics) {
+    use std::time::Instant;
+
+    let total_start = Instant::now();
+
+    assert_eq!(
+        values.len(),
+        width * height,
+        "Grid size mismatch: expected {}x{}={}, got {}",
+        width,
+        height,
+        width * height,
+        values.len()
+    );
+
+    let rows = height;
+    let cols = width;
+
+    // Phase 1: Build GridCell array
+    let grid_start = Instant::now();
+    let grid: Vec<Vec<crate::GridCell>> = (0..rows)
+        .map(|r| {
+            (0..cols)
+                .map(|c| {
+                    let idx = r * cols + c;
+                    crate::GridCell {
+                        x: c as f64,
+                        y: r as f64,
+                        value: values[idx] as f64,
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let grid_build_ms = grid_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Phase 2: Shape classification (create cells)
+    let classification_start = Instant::now();
+    let mut cells: Vec<Vec<Option<Shape>>> = Vec::with_capacity(rows - 1);
+    for _ in 0..rows - 1 {
+        cells.push(vec![None; cols - 1]);
+    }
+
+    for r in 0..rows - 1 {
+        for c in 0..cols - 1 {
+            cells[r][c] = Shape::create_from_cells(
+                &grid[r][c],
+                &grid[r][c + 1],
+                &grid[r + 1][c + 1],
+                &grid[r + 1][c],
+                lower as f64,
+                upper as f64,
+                c,
+                r,
+                r == 0,
+                c + 1 == cols - 1,
+                r + 1 == rows - 1,
+                c == 0,
+            );
+        }
+    }
+    let classification_ms = classification_start.elapsed().as_secs_f64() * 1000.0;
+
+    let cell_rows = cells.len();
+    let cell_cols = cells[0].len();
+
+    // Phase 3: Edge walking
+    let edge_walking_start = Instant::now();
+    let mut polygons: Vec<Vec<Vec<Position>>> = Vec::new();
+    let mut processed = std::collections::HashSet::new();
+
+    for r in 0..cell_rows {
+        for c in 0..cell_cols {
+            if !processed.contains(&(r, c)) {
+                if let Some(cell) = &cells[r][c] {
+                    if !cell.is_cleared() {
+                        let polygon = walk_polygon_recursive_with_precision(
+                            &mut cells,
+                            &grid,
+                            lower as f64,
+                            upper as f64,
+                            r,
+                            c,
+                            &mut processed,
+                            precision,
+                        );
+                        if !polygon.is_empty() && !polygon[0].is_empty() {
+                            polygons.push(polygon);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let edge_walking_ms = edge_walking_start.elapsed().as_secs_f64() * 1000.0;
+    let raw_polygon_count = polygons.len();
+
+    // Phase 4: Build polygon hierarchy
+    let hierarchy_start = Instant::now();
+    let hierarchical_polygons = build_polygon_hierarchy(polygons);
+    let hierarchy_ms = hierarchy_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Phase 5: Orient polygons
+    let orientation_start = Instant::now();
+    let oriented_polygons = orient_polygons(hierarchical_polygons);
+    let orientation_ms = orientation_start.elapsed().as_secs_f64() * 1000.0;
+    let final_polygon_count = oriented_polygons.len();
+
+    // Phase 6: Convert to ContourPolygon format
+    let conversion_start = Instant::now();
+    let multi_polygon = GeoValue::MultiPolygon(oriented_polygons);
+    let feature = Feature {
+        bbox: None,
+        geometry: Some(Geometry::new(multi_polygon)),
+        id: None,
+        properties: Some(JsonObject::new()),
+        foreign_members: None,
+    };
+    let contour_polygons = convert_feature_to_contour_polygons(feature, precision);
+    let conversion_ms = conversion_start.elapsed().as_secs_f64() * 1000.0;
+
+    let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+
+    let metrics = ContourMetrics {
+        grid_build_ms,
+        classification_ms,
+        edge_walking_ms,
+        hierarchy_ms,
+        orientation_ms,
+        conversion_ms,
+        total_ms,
+        raw_polygon_count,
+        final_polygon_count,
+    };
+
+    (contour_polygons, metrics)
 }
 
 /// Process multiple isoband levels from a flat f32 array in parallel
@@ -1758,7 +2035,7 @@ mod tests {
         let oriented = orient_polygons(polygons);
 
         // After orientation: exterior CCW, hole CW
-        assert!(is_ccw(&oriented[0][0]));  // exterior is CCW
+        assert!(is_ccw(&oriented[0][0])); // exterior is CCW
         assert!(!is_ccw(&oriented[0][1])); // hole is CW
     }
 
@@ -1801,11 +2078,7 @@ mod tests {
         //   5   5   5
         //   5  15  15
         //   5  15  15
-        let values: Vec<f32> = vec![
-            5.0, 5.0, 5.0,
-            5.0, 15.0, 15.0,
-            5.0, 15.0, 15.0,
-        ];
+        let values: Vec<f32> = vec![5.0, 5.0, 5.0, 5.0, 15.0, 15.0, 5.0, 15.0, 15.0];
 
         let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 5);
 
@@ -1813,47 +2086,44 @@ mod tests {
         assert!(!polygons.is_empty(), "Should have at least one polygon");
 
         // Check that exterior ring has points
-        assert!(!polygons[0].exterior.is_empty(), "Exterior ring should have points");
+        assert!(
+            !polygons[0].exterior.is_empty(),
+            "Exterior ring should have points"
+        );
     }
 
     #[test]
     fn test_process_band_flat_empty_result() {
         // All values below threshold
-        let values: Vec<f32> = vec![
-            5.0, 5.0, 5.0,
-            5.0, 5.0, 5.0,
-            5.0, 5.0, 5.0,
-        ];
+        let values: Vec<f32> = vec![5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0];
 
         let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 5);
 
         // Should produce no polygons when all values are below threshold
-        assert!(polygons.is_empty(), "Should have no polygons for uniform grid below threshold");
+        assert!(
+            polygons.is_empty(),
+            "Should have no polygons for uniform grid below threshold"
+        );
     }
 
     #[test]
     fn test_process_band_flat_all_above() {
         // All values above threshold
-        let values: Vec<f32> = vec![
-            25.0, 25.0, 25.0,
-            25.0, 25.0, 25.0,
-            25.0, 25.0, 25.0,
-        ];
+        let values: Vec<f32> = vec![25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0];
 
         let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 5);
 
         // Should produce no polygons when all values are above threshold
-        assert!(polygons.is_empty(), "Should have no polygons for uniform grid above threshold");
+        assert!(
+            polygons.is_empty(),
+            "Should have no polygons for uniform grid above threshold"
+        );
     }
 
     #[test]
     fn test_process_band_flat_grid_coords() {
         // 3x3 grid with values that create a contour
-        let values: Vec<f32> = vec![
-            5.0, 5.0, 5.0,
-            5.0, 15.0, 15.0,
-            5.0, 15.0, 15.0,
-        ];
+        let values: Vec<f32> = vec![5.0, 5.0, 5.0, 5.0, 15.0, 15.0, 5.0, 15.0, 15.0];
 
         let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 5);
 
@@ -1862,10 +2132,16 @@ mod tests {
         // Verify coordinates are in grid space (0-2 range for a 3x3 grid)
         for poly in &polygons {
             for point in &poly.exterior {
-                assert!(point[0] >= 0.0 && point[0] <= 2.0,
-                    "X coordinate {} should be in grid range [0, 2]", point[0]);
-                assert!(point[1] >= 0.0 && point[1] <= 2.0,
-                    "Y coordinate {} should be in grid range [0, 2]", point[1]);
+                assert!(
+                    point[0] >= 0.0 && point[0] <= 2.0,
+                    "X coordinate {} should be in grid range [0, 2]",
+                    point[0]
+                );
+                assert!(
+                    point[1] >= 0.0 && point[1] <= 2.0,
+                    "Y coordinate {} should be in grid range [0, 2]",
+                    point[1]
+                );
             }
         }
     }
@@ -1873,11 +2149,7 @@ mod tests {
     #[test]
     fn test_process_band_flat_f32_precision() {
         // Verify f32 coordinates maintain precision
-        let values: Vec<f32> = vec![
-            5.0, 5.0, 5.0,
-            5.0, 15.0, 15.0,
-            5.0, 15.0, 15.0,
-        ];
+        let values: Vec<f32> = vec![5.0, 5.0, 5.0, 5.0, 15.0, 15.0, 5.0, 15.0, 15.0];
 
         let polygons = process_band_flat(&values, 3, 3, 10.0, 20.0, 3);
 
@@ -1889,10 +2161,14 @@ mod tests {
                 // Multiply by 1000, round, check if it's close to an integer
                 let x_scaled = point[0] * 1000.0;
                 let y_scaled = point[1] * 1000.0;
-                assert!((x_scaled - x_scaled.round()).abs() < 0.001,
-                    "X coordinate should be rounded to 3 decimal places");
-                assert!((y_scaled - y_scaled.round()).abs() < 0.001,
-                    "Y coordinate should be rounded to 3 decimal places");
+                assert!(
+                    (x_scaled - x_scaled.round()).abs() < 0.001,
+                    "X coordinate should be rounded to 3 decimal places"
+                );
+                assert!(
+                    (y_scaled - y_scaled.round()).abs() < 0.001,
+                    "Y coordinate should be rounded to 3 decimal places"
+                );
             }
         }
     }
@@ -1911,12 +2187,18 @@ mod tests {
         let results = do_concurrent_flat(&values, 5, 5, &thresholds, 5);
 
         // Should have at least some bands with polygons
-        assert!(!results.is_empty(), "Should have at least one band with polygons");
+        assert!(
+            !results.is_empty(),
+            "Should have at least one band with polygons"
+        );
 
         // Each result should have valid lower/upper thresholds
         for (lower, upper, polygons) in &results {
             assert!(lower < upper, "Lower should be less than upper");
-            assert!(!polygons.is_empty(), "Each returned band should have polygons");
+            assert!(
+                !polygons.is_empty(),
+                "Each returned band should have polygons"
+            );
         }
     }
 
@@ -1936,7 +2218,13 @@ mod tests {
     fn test_contour_polygon_serde() {
         let polygon = ContourPolygon {
             exterior: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]],
-            holes: vec![vec![[0.2, 0.2], [0.2, 0.8], [0.8, 0.8], [0.8, 0.2], [0.2, 0.2]]],
+            holes: vec![vec![
+                [0.2, 0.2],
+                [0.2, 0.8],
+                [0.8, 0.8],
+                [0.8, 0.2],
+                [0.2, 0.2],
+            ]],
         };
 
         // Serialize to JSON
@@ -1960,7 +2248,11 @@ mod tests {
         let json = serde_json::to_string(&polygon).unwrap();
 
         // Empty holes should be skipped in serialization
-        assert!(!json.contains("holes"), "Empty holes should be skipped: {}", json);
+        assert!(
+            !json.contains("holes"),
+            "Empty holes should be skipped: {}",
+            json
+        );
     }
 
     #[test]

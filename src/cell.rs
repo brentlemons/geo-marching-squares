@@ -111,7 +111,12 @@ impl Cell {
 
     /// Get corner points
     pub fn corner_points(&self) -> (&Point, &Point, &Point, &Point) {
-        (&self.top_left, &self.top_right, &self.bottom_right, &self.bottom_left)
+        (
+            &self.top_left,
+            &self.top_right,
+            &self.bottom_right,
+            &self.bottom_left,
+        )
     }
 
     /// Set the computed points (used after interpolation)
@@ -252,11 +257,7 @@ impl Cell {
 
     /// Extract the "value" property from a GeoJSON feature
     fn extract_value(feature: &geojson::Feature) -> Option<f64> {
-        feature
-            .properties
-            .as_ref()?
-            .get("value")?
-            .as_f64()
+        feature.properties.as_ref()?.get("value")?.as_f64()
     }
 
     /// Check if top side has no contour crossing
@@ -284,13 +285,7 @@ impl Cell {
     }
 
     /// Linear interpolation for isolines (no cosine smoothing)
-    fn interpolate(
-        level: f64,
-        value0: f64,
-        value1: f64,
-        point0: &Point,
-        point1: &Point,
-    ) -> Point {
+    fn interpolate(level: f64, value0: f64, value1: f64, point0: &Point, point1: &Point) -> Point {
         let mu = (level - value0) / (value1 - value0);
         let x = ((1.0 - mu) * point0.x().unwrap()) + (mu * point1.x().unwrap());
         let y = ((1.0 - mu) * point0.y().unwrap()) + (mu * point1.y().unwrap());

@@ -16,7 +16,6 @@ fn round_coord_with_precision(value: f64, precision: u32) -> f64 {
     (value * factor).round() / factor
 }
 
-
 /// Check if two points are equal within a small epsilon
 fn points_equal(p1: &Point, p2: &Point) -> bool {
     const EPSILON: f64 = 1e-9;

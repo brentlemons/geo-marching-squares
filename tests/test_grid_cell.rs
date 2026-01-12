@@ -86,7 +86,10 @@ fn test_grid_cell_large_grid_simulation() {
     let thresholds = vec![10.0, 15.0, 20.0];
     let result = do_concurrent_from_cells(&grid, &thresholds);
 
-    assert!(!result.features.is_empty(), "Should generate features from large grid");
+    assert!(
+        !result.features.is_empty(),
+        "Should generate features from large grid"
+    );
 }
 
 #[test]
@@ -120,8 +123,8 @@ fn test_grid_cell_coordinates_preserved() {
 #[test]
 fn test_grid_cell_vs_feature_compatibility() {
     // This test verifies that GridCell and Feature APIs produce similar results
-    use geojson::{Feature, Geometry, JsonObject, Value};
     use geo_marching_squares::do_concurrent;
+    use geojson::{Feature, Geometry, JsonObject, Value};
 
     // Create small test grid
     let grid_size = 5;

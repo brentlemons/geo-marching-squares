@@ -137,7 +137,11 @@ fn test_cell_saddle_cases() {
 
     let cell = cell.unwrap();
     let segments = cell.get_line_segments();
-    assert_eq!(segments.len(), 2, "Case 5 (saddle) should produce 2 segments");
+    assert_eq!(
+        segments.len(),
+        2,
+        "Case 5 (saddle) should produce 2 segments"
+    );
 
     // Case 10: TR and BL above threshold (1010) - saddle case
     let tl_feature = create_point_feature(0.0, 1.0, 5.0);
@@ -150,7 +154,11 @@ fn test_cell_saddle_cases() {
 
     let cell = cell.unwrap();
     let segments = cell.get_line_segments();
-    assert_eq!(segments.len(), 2, "Case 10 (saddle) should produce 2 segments");
+    assert_eq!(
+        segments.len(),
+        2,
+        "Case 10 (saddle) should produce 2 segments"
+    );
 }
 
 #[test]
@@ -162,10 +170,7 @@ fn test_process_line_gradient() {
 
     match &result.geometry.unwrap().value {
         Value::MultiLineString(lines) => {
-            assert!(
-                !lines.is_empty(),
-                "Gradient grid should produce isolines"
-            );
+            assert!(!lines.is_empty(), "Gradient grid should produce isolines");
 
             // Verify lines have at least 2 points
             for line in lines {
@@ -197,10 +202,7 @@ fn test_process_line_circular_closed_loop() {
 
     match &result.geometry.unwrap().value {
         Value::MultiLineString(lines) => {
-            assert!(
-                !lines.is_empty(),
-                "Circular grid should produce isolines"
-            );
+            assert!(!lines.is_empty(), "Circular grid should produce isolines");
 
             // Check if we have a closed loop
             for line in lines {

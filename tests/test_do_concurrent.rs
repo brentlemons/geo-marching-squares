@@ -86,10 +86,7 @@ fn test_do_concurrent_multiple_bands() {
     let result = do_concurrent(&grid, &thresholds);
 
     // Should create up to 3 isobands (some may be empty)
-    assert!(
-        result.features.len() <= 3,
-        "Should have at most 3 isobands"
-    );
+    assert!(result.features.len() <= 3, "Should have at most 3 isobands");
 
     // Verify each feature has correct properties
     for feature in &result.features {
@@ -207,10 +204,7 @@ fn test_do_concurrent_matches_sequential() {
                     assert!(ring.len() >= 4, "Ring should have at least 4 points");
 
                     // First and last point should be the same (closed)
-                    assert_eq!(
-                        ring[0], ring[ring.len() - 1],
-                        "Polygon should be closed"
-                    );
+                    assert_eq!(ring[0], ring[ring.len() - 1], "Polygon should be closed");
                 }
             }
             _ => panic!("Expected MultiPolygon"),
@@ -296,7 +290,10 @@ fn test_do_concurrent_all_bands_populated() {
 
     // Verify feature collection structure
     assert!(result.bbox.is_none(), "bbox should be None");
-    assert!(result.foreign_members.is_none(), "foreign_members should be None");
+    assert!(
+        result.foreign_members.is_none(),
+        "foreign_members should be None"
+    );
 }
 
 #[test]
