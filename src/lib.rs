@@ -150,6 +150,7 @@ mod edge;
 mod grid_cell;
 mod isoline_assembler;
 mod marching_squares;
+pub mod optimized;
 mod point;
 mod shape;
 
@@ -174,10 +175,15 @@ pub use marching_squares::{
     process_line,
     process_line_from_cells,
     process_line_from_cells_with_precision,
+    // Hierarchy and orientation (used by optimized module)
+    build_polygon_hierarchy,
+    orient_polygons,
     ContourMetrics,
     ContourPolygon,
     DEFAULT_PRECISION,
 };
+// Optimized processing
+pub use optimized::{process_band_optimized, process_band_optimized_hybrid};
 pub use point::{Point, Side};
 pub use shape::{Shape, ShapeType};
 
@@ -288,5 +294,18 @@ mod tests {
         let moves = vec![Move::Right, Move::Down, Move::Left, Move::Up, Move::Unknown];
 
         assert_eq!(moves.len(), 5);
+    }
+
+    #[test]
+    fn test_struct_sizes() {
+        use std::mem::size_of;
+        eprintln!("=== Struct Sizes ===");
+        eprintln!("GridCell: {} bytes", size_of::<GridCell>());
+        eprintln!("Point: {} bytes", size_of::<Point>());
+        eprintln!("Edge: {} bytes", size_of::<Edge>());
+        eprintln!("Shape: {} bytes", size_of::<Shape>());
+        eprintln!("Option<Shape>: {} bytes", size_of::<Option<Shape>>());
+        eprintln!("HashMap<Point, Edge>: {} bytes (empty)", size_of::<HashMap<Point, Edge>>());
+        eprintln!("Vec<Point>: {} bytes (empty)", size_of::<Vec<Point>>());
     }
 }

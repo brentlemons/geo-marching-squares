@@ -549,7 +549,7 @@ struct PolygonMeta {
 /// 2. For each counter-clockwise polygon (hole), find its clockwise container
 /// 3. For each clockwise polygon at root level, attach its holes
 /// 4. Nested clockwise polygons (islands in holes) become separate polygons
-fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec<Position>>> {
+pub fn build_polygon_hierarchy(raw_polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec<Position>>> {
     let hierarchy_start = std::time::Instant::now();
 
     if raw_polygons.is_empty() {
@@ -804,7 +804,7 @@ fn reverse_ring(ring: &mut [Position]) {
 /// - Interior rings (holes): clockwise (CW)
 ///
 /// This ensures GeoJSON compliance and correct rendering in mapping libraries.
-fn orient_polygons(polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec<Position>>> {
+pub fn orient_polygons(polygons: Vec<Vec<Vec<Position>>>) -> Vec<Vec<Vec<Position>>> {
     polygons
         .into_iter()
         .map(|mut polygon| {
