@@ -250,11 +250,6 @@ impl Shape {
         let br = bottom_right.value;
         let bl = bottom_left.value;
 
-        // Skip cells with any NaN values - can't interpolate through missing data
-        if tl.is_nan() || tr.is_nan() || br.is_nan() || bl.is_nan() {
-            return None;
-        }
-
         // Create corner points
         let top_left_pt = Point::new(top_left.x, top_left.y);
         let top_right_pt = Point::new(top_right.x, top_right.y);

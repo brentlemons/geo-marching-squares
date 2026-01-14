@@ -211,11 +211,6 @@ impl Cell {
         let br_val = bottom_right.value;
         let bl_val = bottom_left.value;
 
-        // Skip cells with any NaN values - can't interpolate through missing data
-        if tl_val.is_nan() || tr_val.is_nan() || br_val.is_nan() || bl_val.is_nan() {
-            return None;
-        }
-
         // Binary classification
         let mut value = 0u8;
         value |= if tl_val < isovalue { 0 } else { 8 };
