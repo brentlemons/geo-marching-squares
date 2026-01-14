@@ -204,6 +204,11 @@ impl CompactCell {
         is_bottom: bool,
         is_left: bool,
     ) -> Option<Self> {
+        // Skip cells with any NaN values - can't interpolate through missing data
+        if tl.is_nan() || tr.is_nan() || br.is_nan() || bl.is_nan() {
+            return None;
+        }
+
         // Compute ternary classification
         let tl_class = Ternary::classify(tl, lower, upper);
         let tr_class = Ternary::classify(tr, lower, upper);
@@ -1166,5 +1171,100 @@ mod tests {
 
         // Same polygon count
         assert_eq!(orig_polygons.len(), hybrid_polygons.len());
+    }
+
+    #[test]
+    fn test_nan_values_skipped() {
+        // Test that NaN values don't create contour cells
+        // This simulates ocean areas in meteorological data where NaN = no data
+        //
+        // Grid layout (3x3):
+        //   (0,0)=NaN  (1,0)=NaN  (2,0)=NaN
+        //   (0,1)=NaN  (1,1)=NaN  (2,1)=15
+        //   (0,2)=NaN  (1,2)=15   (2,2)=15
+        //
+        // Marching squares cells (2x2):
+        // - Cell(0,0): uses (0,0),(1,0),(1,1),(0,1) = NaN,NaN,NaN,NaN → skip (all NaN)
+        // - Cell(1,0): uses (1,0),(2,0),(2,1),(1,1) = NaN,NaN,15,NaN → skip (has NaN)
+        // - Cell(0,1): uses (0,1),(1,1),(1,2),(0,2) = NaN,NaN,15,NaN → skip (has NaN)
+        // - Cell(1,1): uses (1,1),(2,1),(2,2),(1,2) = NaN,15,15,15 → skip (has NaN)
+        //
+        // All cells have at least one NaN corner, so no polygons should be created.
+        let values: Vec<f32> = vec![
+            f32::NAN, f32::NAN, f32::NAN, // Row 0: all NaN (ocean)
+            f32::NAN, f32::NAN, 15.0,     // Row 1: center is NaN (coastline edge)
+            f32::NAN, 15.0, 15.0,         // Row 2: partial data (land)
+        ];
+
+        let (polygons, metrics) = process_band_optimized_hybrid(&values, 3, 3, 10.0, 20.0, 5);
+
+        println!(
+            "NaN test: polygons={}, raw={}, final={}",
+            polygons.len(),
+            metrics.raw_polygon_count,
+            metrics.final_polygon_count
+        );
+
+        // With NaN handling, no contours should be created because all cells
+        // have at least one NaN corner and can't be interpolated
+        assert!(
+            polygons.is_empty(),
+            "Should produce no polygons when all cells have NaN corners"
+        );
+    }
+
+    #[test]
+    fn test_nan_values_isolated_region() {
+        // Test grid with a single NaN point surrounded by valid data
+        // Cells touching NaN are skipped, but cells away from NaN should work
+        //
+        // Grid layout (5x5) - single NaN at center (2,2):
+        //   15   15   15   15   15    <- Row 0
+        //   15   15   15   15   15    <- Row 1
+        //   15   15  NaN   15   15    <- Row 2 (center is NaN)
+        //   15   15   15   15   15    <- Row 3
+        //   15   15   15   15   15    <- Row 4
+        //
+        // Marching squares cells (4x4 = 16 cells):
+        // - 4 cells touch NaN: (1,1), (2,1), (1,2), (2,2)
+        // - 12 cells don't touch NaN and should produce polygons
+        let values: Vec<f32> = vec![
+            15.0, 15.0, 15.0, 15.0, 15.0, // Row 0
+            15.0, 15.0, 15.0, 15.0, 15.0, // Row 1
+            15.0, 15.0, f32::NAN, 15.0, 15.0, // Row 2: center NaN
+            15.0, 15.0, 15.0, 15.0, 15.0, // Row 3
+            15.0, 15.0, 15.0, 15.0, 15.0, // Row 4
+        ];
+
+        let (polygons, _) = process_band_optimized_hybrid(&values, 5, 5, 10.0, 20.0, 5);
+
+        // 12 cells have all valid values, 4 cells touch the central NaN
+        // The valid cells should form polygons (may merge during post-processing)
+        println!("Polygons with NaN point: {}", polygons.len());
+        assert!(
+            !polygons.is_empty(),
+            "Should create polygons from cells that don't touch NaN"
+        );
+    }
+
+    #[test]
+    fn test_valid_cells_still_create_polygons() {
+        // Verify that valid cells (no NaN) still create polygons correctly
+        // This ensures the NaN check didn't break normal operation
+        let values: Vec<f32> = vec![
+            15.0, 15.0, 15.0, // Row 0
+            15.0, 15.0, 15.0, // Row 1
+            15.0, 15.0, 15.0, // Row 2
+        ];
+
+        let (polygons, _) = process_band_optimized_hybrid(&values, 3, 3, 10.0, 20.0, 5);
+
+        // All 4 cells have valid corners and values within band [10, 20]
+        // They should merge into a single polygon
+        assert!(
+            !polygons.is_empty(),
+            "Should create polygons when all cells have valid values"
+        );
+        println!("Valid grid polygons: {}", polygons.len());
     }
 }
