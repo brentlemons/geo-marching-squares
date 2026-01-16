@@ -1301,6 +1301,23 @@ pub struct ContourPolygon {
     pub holes: Vec<Vec<[f32; 2]>>,
 }
 
+/// A polyline (contour line) using f32 grid-space coordinates.
+///
+/// This is the output format for `process_line_flat()`, designed for efficient
+/// serialization and transmission (e.g., in Lambda responses).
+///
+/// Coordinates are in grid-space:
+/// - x = column index (0 to width-1, with sub-pixel interpolation)
+/// - y = row index (0 to height-1, with sub-pixel interpolation)
+///
+/// Each ContourLine represents a single connected polyline. For a given
+/// isovalue, there may be multiple disconnected lines returned.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ContourLine {
+    /// Points along the polyline, in order
+    pub points: Vec<[f32; 2]>,
+}
+
 /// Timing metrics for contour generation phases.
 ///
 /// All times are in milliseconds (f64).
@@ -1697,6 +1714,268 @@ pub fn do_concurrent_flat(
         .collect()
 }
 
+// =============================================================================
+// ISOLINE (CONTOUR LINE) FLAT ARRAY PROCESSING
+// =============================================================================
+
+/// Process a single isoline (contour line) from a flat f32 array.
+///
+/// Generates contour lines at a specific threshold value from a flat row-major
+/// grid array. This is the isoline equivalent of `process_band_flat()`.
+///
+/// Returns polylines in grid-space coordinates (f32).
+/// Coordinates represent positions in the grid where:
+/// - x = column index (0 to width-1, with sub-pixel interpolation)
+/// - y = row index (0 to height-1, with sub-pixel interpolation)
+///
+/// # Arguments
+///
+/// * `values` - Flat row-major array of grid values (f32, e.g., from Zarr)
+/// * `width` - Number of columns in the grid
+/// * `height` - Number of rows in the grid
+/// * `isovalue` - Threshold value for the contour line
+/// * `precision` - Decimal places for coordinate rounding (default 5)
+///
+/// # Returns
+///
+/// Vector of polylines (ContourLine), each representing a connected contour line.
+/// Multiple disconnected lines are returned as separate ContourLine objects.
+///
+/// # Panics
+///
+/// Panics if `values.len() != width * height`
+///
+/// # Example
+///
+/// ```rust
+/// use geo_marching_squares::process_line_flat;
+///
+/// // 3x3 grid with a gradient
+/// let values: Vec<f32> = vec![
+///     5.0,  5.0,  5.0,
+///     10.0, 10.0, 10.0,
+///     15.0, 15.0, 15.0,
+/// ];
+///
+/// let lines = process_line_flat(&values, 3, 3, 10.0, 5);
+/// // Returns contour line(s) at value 10.0
+/// ```
+pub fn process_line_flat(
+    values: &[f32],
+    width: usize,
+    height: usize,
+    isovalue: f32,
+    precision: u32,
+) -> Vec<ContourLine> {
+    assert_eq!(
+        values.len(),
+        width * height,
+        "Grid size mismatch: expected {}x{}={}, got {}",
+        width,
+        height,
+        width * height,
+        values.len()
+    );
+
+    let rows = height;
+    let cols = width;
+
+    // Build a 2D GridCell array with grid indices as coordinates
+    let grid: Vec<Vec<crate::GridCell>> = (0..rows)
+        .map(|r| {
+            (0..cols)
+                .map(|c| {
+                    let idx = r * cols + c;
+                    crate::GridCell {
+                        x: c as f64,
+                        y: r as f64,
+                        value: values[idx] as f64,
+                    }
+                })
+                .collect()
+        })
+        .collect();
+
+    // Use existing process_line_from_cells_with_precision to generate GeoJSON
+    let feature = process_line_from_cells_with_precision(&grid, isovalue as f64, precision);
+
+    // Convert GeoJSON MultiLineString to ContourLine format with f32 coords
+    convert_feature_to_contour_lines(feature, precision)
+}
+
+/// Process a single isoline from a flat f32 array, returning detailed timing metrics.
+///
+/// This is the metrics-enabled version of `process_line_flat()`. Use this when you
+/// need detailed performance data for contour generation.
+///
+/// # Arguments
+///
+/// * `values` - Flat row-major array of grid values (f32, e.g., from Zarr)
+/// * `width` - Number of columns in the grid
+/// * `height` - Number of rows in the grid
+/// * `isovalue` - Threshold value for the contour line
+/// * `precision` - Decimal places for coordinate rounding (default 5)
+///
+/// # Returns
+///
+/// A tuple of (lines, metrics) where:
+/// - `lines`: Vector of polylines (ContourLine)
+/// - `metrics`: Timing data for each processing phase
+pub fn process_line_flat_with_metrics(
+    values: &[f32],
+    width: usize,
+    height: usize,
+    isovalue: f32,
+    precision: u32,
+) -> (Vec<ContourLine>, ContourMetrics) {
+    use std::time::Instant;
+
+    let total_start = Instant::now();
+
+    assert_eq!(
+        values.len(),
+        width * height,
+        "Grid size mismatch: expected {}x{}={}, got {}",
+        width,
+        height,
+        width * height,
+        values.len()
+    );
+
+    let rows = height;
+    let cols = width;
+
+    // Phase 1: Build GridCell array
+    let grid_start = Instant::now();
+    let grid: Vec<Vec<crate::GridCell>> = (0..rows)
+        .map(|r| {
+            (0..cols)
+                .map(|c| {
+                    let idx = r * cols + c;
+                    crate::GridCell {
+                        x: c as f64,
+                        y: r as f64,
+                        value: values[idx] as f64,
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let grid_build_ms = grid_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Phase 2: Cell classification and line segment generation
+    let classification_start = Instant::now();
+    let feature = process_line_from_cells_with_precision(&grid, isovalue as f64, precision);
+    let classification_ms = classification_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Phase 3: Convert to ContourLine format
+    let conversion_start = Instant::now();
+    let lines = convert_feature_to_contour_lines(feature, precision);
+    let conversion_ms = conversion_start.elapsed().as_secs_f64() * 1000.0;
+
+    let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+
+    let metrics = ContourMetrics {
+        grid_build_ms,
+        classification_ms,
+        edge_walking_ms: 0.0, // Included in classification for isolines
+        hierarchy_ms: 0.0,    // N/A for isolines
+        orientation_ms: 0.0,  // N/A for isolines
+        conversion_ms,
+        raw_polygon_count: lines.len(),
+        final_polygon_count: lines.len(),
+        total_ms,
+    };
+
+    (lines, metrics)
+}
+
+/// Convert a GeoJSON Feature with MultiLineString geometry to ContourLine format
+fn convert_feature_to_contour_lines(feature: Feature, precision: u32) -> Vec<ContourLine> {
+    let geometry = match feature.geometry {
+        Some(g) => g,
+        None => return vec![],
+    };
+
+    let multi_linestring = match geometry.value {
+        GeoValue::MultiLineString(mls) => mls,
+        _ => return vec![],
+    };
+
+    let factor = 10_f32.powi(precision as i32);
+
+    multi_linestring
+        .into_iter()
+        .filter(|line| line.len() >= 2) // Filter out degenerate lines
+        .map(|line| {
+            let points = line
+                .into_iter()
+                .map(|pos| {
+                    [
+                        (pos[0] as f32 * factor).round() / factor,
+                        (pos[1] as f32 * factor).round() / factor,
+                    ]
+                })
+                .collect();
+            ContourLine { points }
+        })
+        .collect()
+}
+
+/// Process multiple isolines concurrently from a flat f32 array.
+///
+/// Uses Rayon for parallel processing of each isovalue.
+///
+/// # Arguments
+///
+/// * `values` - Flat row-major array of grid values (f32)
+/// * `width` - Number of columns in the grid
+/// * `height` - Number of rows in the grid
+/// * `isovalues` - List of threshold values for contour lines
+/// * `precision` - Decimal places for coordinate rounding
+///
+/// # Returns
+///
+/// Vector of (isovalue, Vec<ContourLine>) tuples, one per isovalue.
+/// Results with no lines are filtered out.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use geo_marching_squares::do_concurrent_lines_flat;
+///
+/// let values: Vec<f32> = fetch_zarr_data();
+/// let isovalues = vec![0.0, 10.0, 20.0, 30.0];
+/// let results = do_concurrent_lines_flat(&values, 1799, 1059, &isovalues, 5);
+///
+/// for (isovalue, lines) in results {
+///     println!("Isovalue {}: {} lines", isovalue, lines.len());
+/// }
+/// ```
+pub fn do_concurrent_lines_flat(
+    values: &[f32],
+    width: usize,
+    height: usize,
+    isovalues: &[f32],
+    precision: u32,
+) -> Vec<(f32, Vec<ContourLine>)> {
+    use rayon::prelude::*;
+
+    if isovalues.is_empty() {
+        return vec![];
+    }
+
+    // Process all isovalues in parallel
+    isovalues
+        .par_iter()
+        .map(|&isovalue| {
+            let lines = process_line_flat(values, width, height, isovalue, precision);
+            (isovalue, lines)
+        })
+        .filter(|(_, lines)| !lines.is_empty())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2038,5 +2317,113 @@ mod tests {
     fn test_process_band_flat_size_mismatch() {
         let values: Vec<f32> = vec![5.0; 10]; // 10 values
         process_band_flat(&values, 3, 3, 10.0, 20.0, 5); // Expects 9 values
+    }
+
+    // =========================================================================
+    // Isoline flat array tests
+    // =========================================================================
+
+    #[test]
+    fn test_process_line_flat_simple() {
+        // 3x3 grid with a horizontal gradient
+        // Values increase from top to bottom: 5, 10, 15
+        let values: Vec<f32> = vec![
+            5.0, 5.0, 5.0,   // row 0: all below 10
+            10.0, 10.0, 10.0, // row 1: at threshold
+            15.0, 15.0, 15.0, // row 2: all above 10
+        ];
+
+        let lines = process_line_flat(&values, 3, 3, 10.0, 5);
+
+        // Should produce at least one contour line at y=1.0 (between rows 0 and 1)
+        assert!(!lines.is_empty(), "Should produce at least one contour line");
+    }
+
+    #[test]
+    fn test_process_line_flat_no_contour() {
+        // All values above threshold
+        let values: Vec<f32> = vec![15.0; 9];
+
+        let lines = process_line_flat(&values, 3, 3, 10.0, 5);
+
+        // No contour when all values are above threshold
+        assert!(lines.is_empty(), "Should produce no contour lines when all above");
+    }
+
+    #[test]
+    fn test_process_line_flat_all_below() {
+        // All values below threshold
+        let values: Vec<f32> = vec![5.0; 9];
+
+        let lines = process_line_flat(&values, 3, 3, 10.0, 5);
+
+        // No contour when all values are below threshold
+        assert!(lines.is_empty(), "Should produce no contour lines when all below");
+    }
+
+    #[test]
+    fn test_contour_line_serde() {
+        let line = ContourLine {
+            points: vec![[0.0, 0.5], [1.0, 0.5], [2.0, 0.5]],
+        };
+
+        // Serialize to JSON
+        let json = serde_json::to_string(&line).unwrap();
+        assert!(json.contains("points"));
+
+        // Deserialize back
+        let deserialized: ContourLine = serde_json::from_str(&json).unwrap();
+        assert_eq!(line.points.len(), deserialized.points.len());
+    }
+
+    #[test]
+    fn test_do_concurrent_lines_flat() {
+        // 3x3 grid with a gradient
+        let values: Vec<f32> = vec![
+            0.0, 0.0, 0.0,
+            10.0, 10.0, 10.0,
+            20.0, 20.0, 20.0,
+        ];
+
+        let isovalues = vec![5.0, 10.0, 15.0];
+        let results = do_concurrent_lines_flat(&values, 3, 3, &isovalues, 5);
+
+        // Should produce lines for isovalues that cross the data range
+        // 5.0 is between 0 and 10 - should have lines
+        // 10.0 is exactly at middle row - boundary case
+        // 15.0 is between 10 and 20 - should have lines
+        assert!(!results.is_empty(), "Should produce some contour lines");
+    }
+
+    #[test]
+    fn test_do_concurrent_lines_flat_empty_isovalues() {
+        let values: Vec<f32> = vec![5.0; 9];
+        let isovalues: Vec<f32> = vec![];
+
+        let results = do_concurrent_lines_flat(&values, 3, 3, &isovalues, 5);
+        assert!(results.is_empty(), "Empty isovalues should return empty results");
+    }
+
+    #[test]
+    fn test_process_line_flat_with_metrics() {
+        let values: Vec<f32> = vec![
+            5.0, 5.0, 5.0,
+            10.0, 10.0, 10.0,
+            15.0, 15.0, 15.0,
+        ];
+
+        let (lines, metrics) = process_line_flat_with_metrics(&values, 3, 3, 10.0, 5);
+
+        // Check that metrics have reasonable values
+        assert!(metrics.total_ms >= 0.0, "Total time should be non-negative");
+        assert!(metrics.grid_build_ms >= 0.0, "Grid build time should be non-negative");
+        assert_eq!(metrics.final_polygon_count, lines.len(), "Metrics should match line count");
+    }
+
+    #[test]
+    #[should_panic(expected = "Grid size mismatch")]
+    fn test_process_line_flat_size_mismatch() {
+        let values: Vec<f32> = vec![5.0; 10]; // 10 values
+        process_line_flat(&values, 3, 3, 10.0, 5); // Expects 9 values
     }
 }

@@ -167,6 +167,8 @@ pub use marching_squares::{
     do_concurrent_lines,
     do_concurrent_lines_from_cells,
     do_concurrent_lines_from_cells_with_precision,
+    // Flat array isoline processing (for Lambda/high-performance use)
+    do_concurrent_lines_flat,
     orient_polygons,
     process_band,
     // Flat array processing (for Lambda/high-performance use)
@@ -176,8 +178,12 @@ pub use marching_squares::{
     // Precision-aware variants
     process_band_from_cells_with_precision,
     process_line,
+    // Flat array isoline processing
+    process_line_flat,
+    process_line_flat_with_metrics,
     process_line_from_cells,
     process_line_from_cells_with_precision,
+    ContourLine,
     ContourMetrics,
     ContourPolygon,
     DEFAULT_PRECISION,
