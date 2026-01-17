@@ -5,8 +5,8 @@
 **🎉 PROJECT COMPLETE - PRODUCTION READY 🎉**
 
 **Current Phase:** ALL 8 PHASES COMPLETE ✅
-**Last Updated:** 2026-01-15
-**Last Commit:** `3ae4002` - Phase 8 flat array processing for zarr-contour
+**Last Updated:** 2026-01-17
+**Last Commit:** `463d08a` - Fix isoline segment mappings for cases 13 and 14
 **Total Lines:** ~5,100+
 **Tests Passing:** 67/67 ✅
 
@@ -127,6 +127,23 @@ Added flat f32 array processing functions for direct integration with zarr-conto
 - ✅ `ContourMetrics` - detailed timing breakdown
 
 These functions bypass GeoJSON Features for better performance in Lambda contexts where coordinates are later transformed to WGS84.
+
+### Bug Fix: Isoline Segment Mappings (2026-01-17)
+**Commit:** `463d08a`
+
+Fixed a critical bug in `src/cell.rs` where marching squares cases 13 and 14 had incorrect segment mappings, causing panics when processing isolines:
+
+| Case | Binary | Corner Values | Bug | Fix |
+|------|--------|---------------|-----|-----|
+| 13 | 1101 | TL↑ TR↑ BR↓ BL↑ | `Bottom-Left` (Left blank!) | `Bottom-Right` |
+| 14 | 1110 | TL↑ TR↑ BR↑ BL↓ | `Right-Bottom` (Right blank!) | `Left-Bottom` |
+
+The bug caused `panic!("Point not found for side {:?}")` when the code tried to access interpolated points on sides that had no contour crossing.
+
+**Impact**: This fix resolved multiple visual artifacts in zarr-contour/grib-inspector isolines:
+- Missing contour lines at certain geographic locations
+- Antimeridian rendering issues
+- Pole wrapping artifacts
 
 ---
 
