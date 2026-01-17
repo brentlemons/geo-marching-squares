@@ -363,8 +363,8 @@ impl Cell {
             9 => segments.push(self.create_segment(Side::Top, Side::Bottom)),
             11 => segments.push(self.create_segment(Side::Top, Side::Right)),
             12 => segments.push(self.create_segment(Side::Right, Side::Left)),
-            13 => segments.push(self.create_segment(Side::Bottom, Side::Left)),
-            14 => segments.push(self.create_segment(Side::Right, Side::Bottom)),
+            13 => segments.push(self.create_segment(Side::Bottom, Side::Right)),
+            14 => segments.push(self.create_segment(Side::Left, Side::Bottom)),
 
             // Saddle cases - two separate segments
             5 => {
